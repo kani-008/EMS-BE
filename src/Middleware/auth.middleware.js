@@ -1,20 +1,12 @@
 // backend/src/middleware/auth.middleware.js
 const jwt = require("jsonwebtoken");
 
-const ROLE_MAP = {
-  R01: "STUDENT",
-  R02: "FACULTY",
-  R03: "ADVISOR",
-  R04: "HOD",
-  R05: "PRINCIPAL",
-  R06: "ADMIN",
-  R07: "PLACEMENT",
-  R08: "SPORTS",
-};
-
-function mapRole(roleId) {
-  return ROLE_MAP[roleId] || "UNKNOWN";
-}
+// The hardcoded ROLE_MAP that used to live here (R06→"ADMIN", R08→"SPORTS" —
+// backwards from the real DB data) is gone. auth.service.js now resolves the
+// correct role name from the database ONCE, at login, via
+// sp_get_role_name_by_id / sp_get_credentials_role_name, and signs it into
+// the JWT. Since the JWT is signed with JWT_SECRET, `decoded.role` can be
+// trusted here without hitting the database again on every request.
 
 function isAuthDebugEnabled() {
   return String(process.env.AUTH_DEBUG || "").toLowerCase() === "true";
@@ -22,13 +14,9 @@ function isAuthDebugEnabled() {
 
 const verifyToken = async (req, res, next) => {
   try {
-    // ✅ Try to get token from:
-    // 1. Authorization header (Bearer token) - for backward compatibility
-    // 2. HTTP-only cookie - new secure method
-    
     let token;
     const authHeader = req.headers.authorization;
-    
+
     if (authHeader && authHeader.startsWith("Bearer ")) {
       token = authHeader.split(" ")[1];
     } else if (req.cookies && req.cookies.token) {
@@ -41,18 +29,14 @@ const verifyToken = async (req, res, next) => {
 
     const jwtSecret = process.env.JWT_SECRET;
     if (!jwtSecret) {
-      return res
-        .status(500)
-        .json({ success: false, message: "Server misconfigured" });
+      return res.status(500).json({ success: false, message: "Server misconfigured" });
     }
 
     const decoded = jwt.verify(token, jwtSecret);
 
-    const mappedRole = mapRole(decoded.roleId);
-
     req.user = {
       username: decoded.username,
-      role: mappedRole,
+      role: decoded.role || "UNKNOWN",
       roleId: decoded.roleId,
       department_id: decoded.department_id || decoded.departmentId || null,
       status: decoded.status || null,
@@ -66,9 +50,7 @@ const verifyToken = async (req, res, next) => {
     next();
   } catch (err) {
     if (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError") {
-      return res
-        .status(401)
-        .json({ success: false, message: "Invalid or expired token" });
+      return res.status(401).json({ success: false, message: "Invalid or expired token" });
     }
     console.error("❌ Auth middleware error:", err.message);
     return res.status(500).json({ success: false, message: "Authentication error" });

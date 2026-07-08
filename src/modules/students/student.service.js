@@ -1,6 +1,7 @@
 // backend/src/modules/students/student.service.js
-// ALL database logic lives in MySQL stored procedures.
-// This file ONLY calls procedures — zero raw SQL for business logic.
+// ALL database logic lives in Postgres functions.
+// This file ONLY calls functions for business logic — pg placeholders ($1,$2..)
+// instead of mysql2's `?`.
 
 const bcrypt = require("bcrypt");
 const { authPool, eventPool, callProcedure } = require("../../config/db");
@@ -19,11 +20,11 @@ exports.getStudentProfileService = async (req) => {
 
   const p = rows[0];
 
-  // Fetch status from credentials DB
-  const [[credRow]] = await authPool.query(
-    `SELECT user_name, status FROM table_login WHERE user_name = ? LIMIT 1`,
+  const { rows: credRows } = await authPool.query(
+    `SELECT user_name, status FROM table_login WHERE user_name = $1 LIMIT 1`,
     [username]
   );
+  const credRow = credRows[0];
 
   return {
     success: true,
@@ -55,23 +56,17 @@ exports.updateStudentProfileService = async (req, payload) => {
   const { username } = req.user;
   const { first_name, last_name, registration_no, gender } = payload;
 
-  await eventPool.query(
-    `CALL sp_update_student_profile(?, ?, ?, ?, ?, @p_success, @p_message)`,
-    [
-      username,
-      (first_name || "").trim(),
-      (last_name || "").trim(),
-      (registration_no || "").trim(),
-      (gender || "").trim(),
-    ]
-  );
+  const rows = await callProcedure(eventPool, "sp_update_student_profile", [
+    username,
+    (first_name || "").trim(),
+    (last_name || "").trim(),
+    (registration_no || "").trim(),
+    (gender || "").trim(),
+  ]);
+  const outRow = rows[0];
 
-  const [[outRow]] = await eventPool.query(
-    `SELECT @p_success AS success, @p_message AS message`
-  );
-
-  if (!outRow || !Number(outRow.success)) {
-    throw new Error(outRow?.message || "Profile update failed");
+  if (!outRow || !outRow.p_success) {
+    throw new Error(outRow?.p_message || "Profile update failed");
   }
 
   return { success: true, message: "Profile updated successfully" };
@@ -89,22 +84,21 @@ exports.changeStudentPasswordService = async (req, payload) => {
     throw new Error("New password must be at least 6 characters");
   }
 
-  // Verify current password
-  const [[credRow]] = await authPool.query(
-    `SELECT password FROM table_login WHERE user_name = ? LIMIT 1`,
+  const { rows } = await authPool.query(
+    `SELECT password FROM table_login WHERE user_name = $1 LIMIT 1`,
     [username]
   );
+  const credRow = rows[0];
   if (!credRow) throw new Error("Student credentials not found");
 
   const isMatch = await bcrypt.compare(currentPassword, credRow.password);
   if (!isMatch) throw new Error("Current password is incorrect");
 
-  // Hash and save new password
   const saltRounds = parseInt(process.env.BCRYPT_SALT || "10", 10);
   const newHash = await bcrypt.hash(newPassword, saltRounds);
 
   await authPool.query(
-    `UPDATE table_login SET password = ?, last_updated_by = ? WHERE user_name = ?`,
+    `UPDATE table_login SET password = $1, last_updated_by = $2 WHERE user_name = $3`,
     [newHash, username, username]
   );
 

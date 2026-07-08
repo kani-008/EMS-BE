@@ -1,5 +1,13 @@
 // backend/src/config/db.js
-const mysql = require("mysql2/promise");
+// Postgres version — replaces mysql2/promise with `pg`.
+//
+// Architecture unchanged from the MySQL version: two separate database
+// connections (credentials, event_management), each its own Pool, because
+// Postgres — like MySQL — cannot do cross-database queries/transactions
+// without an extension (postgres_fdw/dblink). The distributed-rollback
+// pattern in admin.service.js therefore stays exactly as it was: app-level
+// compensation, not a real two-phase commit.
+const { Pool } = require("pg");
 
 function assertValidProcedureName(procName) {
   if (typeof procName !== "string" || !/^[A-Za-z0-9_]+$/.test(procName)) {
@@ -7,93 +15,71 @@ function assertValidProcedureName(procName) {
   }
 }
 
+/**
+ * callProcedure — calls a Postgres function that either RETURNS TABLE(...)
+ * or has OUT parameters (or both). Either way, Postgres lets you call it as
+ * a normal set-returning expression, so a single
+ *   SELECT * FROM proc_name($1, $2, ...)
+ * gets everything back in one round trip — no more two-step
+ * "CALL proc(...,@out)" + "SELECT @out" dance that MySQL needed.
+ */
 async function callProcedure(pool, procName, params = []) {
   assertValidProcedureName(procName);
-  const placeholders =
-    params.length > 0 ? `(${params.map(() => "?").join(",")})` : "()";
-
-  // IMPORTANT: Backend must ONLY call stored procedures (no direct SQL).
-  const [rows] = await pool.query(`CALL ${procName}${placeholders}`, params);
-
-  // mysql2 returns result sets for CALL as an array-of-arrays.
-  // Normalize to: first result set rows (or []).
-  if (Array.isArray(rows)) {
-    if (Array.isArray(rows[0])) return rows[0];
-    return rows;
-  }
-  return [];
+  const placeholders = params.map((_, i) => `$${i + 1}`).join(",");
+  const sql = `SELECT * FROM ${procName}(${placeholders})`;
+  const { rows } = await pool.query(sql, params);
+  return rows;
 }
 
 /**
  * DB 1: Credentials (Authentication)
- * Used exclusively for user login credentials and role assignment.
  */
-const authPool = mysql.createPool({
+const authPool = new Pool({
   host: process.env.AUTH_DB_HOST || "localhost",
-  port: parseInt(process.env.AUTH_DB_PORT || "3306", 10),
-  user: process.env.AUTH_DB_USER || "root",
+  port: parseInt(process.env.AUTH_DB_PORT || "5432", 10),
+  user: process.env.AUTH_DB_USER || "postgres",
   password: process.env.AUTH_DB_PASSWORD || "",
   database: process.env.AUTH_DB_NAME || "credentials",
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  enableKeepAlive: true,
+  max: parseInt(process.env.AUTH_DB_POOL_MAX || "10", 10),
 });
 
 authPool.on("error", (err) => {
-  console.error("❌ Unexpected MySQL authPool error:", err.message);
-  if (err.code === "PROTOCOL_CONNECTION_LOST") {
-    console.error("Database connection was closed.");
-  }
-  if (err.code === "PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR") {
-    console.error("Database had a fatal error.");
-  }
+  console.error("❌ Unexpected Postgres authPool error:", err.message);
 });
 
 /**
  * DB 2: Event_Management (Academic & Operational Data)
- * Used for student data, events, and all operational records.
  */
-const eventPool = mysql.createPool({
+const eventPool = new Pool({
   host: process.env.EVENT_DB_HOST || "localhost",
-  port: parseInt(process.env.EVENT_DB_PORT || "3306", 10),
-  user: process.env.EVENT_DB_USER || "root",
+  port: parseInt(process.env.EVENT_DB_PORT || "5432", 10),
+  user: process.env.EVENT_DB_USER || "postgres",
   password: process.env.EVENT_DB_PASSWORD || "",
   database: process.env.EVENT_DB_NAME || "event_management",
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  enableKeepAlive: true,
+  max: parseInt(process.env.EVENT_DB_POOL_MAX || "10", 10),
 });
 
 eventPool.on("error", (err) => {
-  console.error("❌ Unexpected MySQL eventPool error:", err.message);
-  if (err.code === "PROTOCOL_CONNECTION_LOST") {
-    console.error("Database connection was closed.");
-  }
-  if (err.code === "PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR") {
-    console.error("Database had a fatal error.");
-  }
+  console.error("❌ Unexpected Postgres eventPool error:", err.message);
 });
 
 /**
- * connectDB — Verify both MySQL pools can reach their respective databases at startup.
+ * connectDB — Verify both Postgres pools can reach their databases at startup.
  */
 const connectDB = async () => {
   try {
-    const authConnection = await authPool.getConnection();
-    await authConnection.ping();
-    authConnection.release();
-    console.log(`✅ Auth DB (Credentials) connected`);
+    const authClient = await authPool.connect();
+    await authClient.query("SELECT 1");
+    authClient.release();
+    console.log("✅ Auth DB (credentials) connected");
 
-    const eventConnection = await eventPool.getConnection();
-    await eventConnection.ping();
-    eventConnection.release();
-    console.log(`✅ Event DB (Event_Management) connected`);
+    const eventClient = await eventPool.connect();
+    await eventClient.query("SELECT 1");
+    eventClient.release();
+    console.log("✅ Event DB (event_management) connected");
   } catch (err) {
-    console.error("❌ MySQL connection failed:", err.message);
+    console.error("❌ Postgres connection failed:", err.message);
     console.error("Ensure both databases are running and credentials are correct.");
-
     process.exit(1);
   }
 };

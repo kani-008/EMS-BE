@@ -76,14 +76,13 @@ exports.getMe = async (req, res) => {
   try {
     const { username, role, roleId, department_id, status } = req.user;
 
-    // Fetch department name from DB if department_id exists
     let departmentName = null;
-    let advisorFields = {}; // current_year, batch for advisor role
+    let advisorFields = {};
 
     if (department_id) {
       try {
-        const [deptRows] = await eventPool.query(
-          "SELECT department_name FROM department WHERE department_id = ?",
+        const { rows: deptRows } = await eventPool.query(
+          "SELECT department_name FROM department WHERE department_id = $1",
           [department_id]
         );
         if (deptRows && deptRows.length > 0) {
@@ -94,11 +93,10 @@ exports.getMe = async (req, res) => {
       }
     }
 
-    // If user is ADVISOR, fetch their assigned batch + current_year from user_faculty
     if (role === "ADVISOR") {
       try {
-        const [facultyRows] = await eventPool.query(
-          "SELECT current_year, batch FROM user_faculty WHERE user_name = ? LIMIT 1",
+        const { rows: facultyRows } = await eventPool.query(
+          "SELECT current_year, batch FROM user_faculty WHERE user_name = $1 LIMIT 1",
           [username]
         );
         if (facultyRows && facultyRows.length > 0) {
@@ -119,9 +117,9 @@ exports.getMe = async (req, res) => {
         role,
         roleId,
         department_id: department_id ?? null,
-        departmentName,          // ← used by CreateUserForm to lock department field
+        departmentName,
         status: status || null,
-        ...advisorFields,        // current_year, batch (only for ADVISOR)
+        ...advisorFields,
       },
     });
   } catch (err) {
