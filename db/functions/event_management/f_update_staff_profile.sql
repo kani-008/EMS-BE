@@ -1,5 +1,5 @@
-DROP FUNCTION IF EXISTS sp_update_staff_profile(VARCHAR,VARCHAR,VARCHAR);
-CREATE OR REPLACE FUNCTION sp_update_staff_profile(
+DROP FUNCTION IF EXISTS event_management.sp_update_staff_profile(VARCHAR,VARCHAR,VARCHAR);
+CREATE OR REPLACE FUNCTION event_management.sp_update_staff_profile(
   p_username VARCHAR, p_contact VARCHAR, p_updated_by VARCHAR,
   OUT p_success BOOLEAN, OUT p_message VARCHAR
 ) AS $$
@@ -14,4 +14,5 @@ BEGIN
     p_success := TRUE; p_message := 'Profile updated successfully';
   END IF;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = credentials, event_management, public;

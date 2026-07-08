@@ -4,9 +4,9 @@
 -- Database: event_management
 -- Node call:  SELECT * FROM sp_create_staff_user($1,...,$10);
 
-DROP FUNCTION IF EXISTS sp_create_staff_user(VARCHAR,VARCHAR,VARCHAR,VARCHAR,VARCHAR,INT,VARCHAR,INT,VARCHAR,VARCHAR);
+DROP FUNCTION IF EXISTS event_management.sp_create_staff_user(VARCHAR,VARCHAR,VARCHAR,VARCHAR,VARCHAR,INT,VARCHAR,INT,VARCHAR,VARCHAR);
 
-CREATE OR REPLACE FUNCTION sp_create_staff_user(
+CREATE OR REPLACE FUNCTION event_management.sp_create_staff_user(
   p_username      VARCHAR,
   p_first_name    VARCHAR,
   p_last_name     VARCHAR,
@@ -80,4 +80,5 @@ EXCEPTION WHEN OTHERS THEN
   p_message := SQLERRM;
   p_faculty_id := NULL;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = credentials, event_management, public;

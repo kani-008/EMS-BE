@@ -1,5 +1,5 @@
-DROP FUNCTION IF EXISTS sp_get_all_users();
-CREATE OR REPLACE FUNCTION sp_get_all_users()
+DROP FUNCTION IF EXISTS event_management.sp_get_all_users();
+CREATE OR REPLACE FUNCTION event_management.sp_get_all_users()
 RETURNS TABLE(
   faculty_id VARCHAR, first_name VARCHAR, last_name VARCHAR, user_name VARCHAR,
   gender VARCHAR, department_name VARCHAR, user_role_id VARCHAR, user_role VARCHAR,
@@ -15,4 +15,5 @@ BEGIN
   LEFT JOIN user_role ur ON uf.user_role_id = ur.user_role_id
   ORDER BY uf.created_on DESC;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = credentials, event_management, public;

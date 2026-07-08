@@ -5,9 +5,9 @@
 -- Database: credentials
 -- Node call:  SELECT * FROM sp_insert_login($1,$2,$3,$4,$5,$6);
 
-DROP FUNCTION IF EXISTS sp_insert_login(VARCHAR, VARCHAR, VARCHAR, INT, VARCHAR, VARCHAR);
+DROP FUNCTION IF EXISTS credentials.sp_insert_login(VARCHAR, VARCHAR, VARCHAR, INT, VARCHAR, VARCHAR);
 
-CREATE OR REPLACE FUNCTION sp_insert_login(
+CREATE OR REPLACE FUNCTION credentials.sp_insert_login(
   p_username      VARCHAR,
   p_password      VARCHAR,
   p_role_id       VARCHAR,
@@ -36,4 +36,5 @@ BEGIN
 
   RETURN QUERY SELECT CASE WHEN v_existed THEN 0 ELSE 1 END;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = credentials, event_management, public;

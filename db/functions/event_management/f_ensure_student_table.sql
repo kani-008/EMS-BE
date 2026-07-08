@@ -13,9 +13,9 @@
 -- Database: event_management
 -- Node call:  SELECT * FROM sp_ensure_student_table($1);
 
-DROP FUNCTION IF EXISTS sp_ensure_student_table(VARCHAR);
+DROP FUNCTION IF EXISTS event_management.sp_ensure_student_table(VARCHAR);
 
-CREATE OR REPLACE FUNCTION sp_ensure_student_table(p_department_name VARCHAR)
+CREATE OR REPLACE FUNCTION event_management.sp_ensure_student_table(p_department_name VARCHAR)
 RETURNS TABLE(table_name VARCHAR) AS $$
 DECLARE
   v_table_name VARCHAR;
@@ -27,7 +27,7 @@ BEGIN
   v_table_name := 'user_student_' || LOWER(REGEXP_REPLACE(TRIM(p_department_name), '[^A-Za-z0-9]', '', 'g'));
 
   EXECUTE format($f$
-    CREATE TABLE IF NOT EXISTS %I (
+    CREATE TABLE IF NOT EXISTS event_management.%I (
       s_no                SERIAL PRIMARY KEY,
       roll_no             VARCHAR(100) NOT NULL UNIQUE,
       registration_no     VARCHAR(100),
@@ -58,10 +58,11 @@ BEGIN
   EXECUTE format('CREATE INDEX IF NOT EXISTS %I ON %I (status)', v_table_name || '_status_idx', v_table_name);
   EXECUTE format('DROP TRIGGER IF EXISTS %I ON %I', v_table_name || '_updated', v_table_name);
   EXECUTE format(
-    'CREATE TRIGGER %I BEFORE UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION set_last_updated_on()',
+    'CREATE TRIGGER %I BEFORE UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION public.set_last_updated_on()',
     v_table_name || '_updated', v_table_name
   );
 
   RETURN QUERY SELECT v_table_name;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = credentials, event_management, public;

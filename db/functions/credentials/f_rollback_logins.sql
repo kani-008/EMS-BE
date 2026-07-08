@@ -6,9 +6,9 @@
 -- Database: credentials
 -- Node call:  SELECT * FROM sp_rollback_logins($1);   -- $1 = 'user1,user2,...'
 
-DROP FUNCTION IF EXISTS sp_rollback_logins(TEXT);
+DROP FUNCTION IF EXISTS credentials.sp_rollback_logins(TEXT);
 
-CREATE OR REPLACE FUNCTION sp_rollback_logins(p_usernames TEXT)
+CREATE OR REPLACE FUNCTION credentials.sp_rollback_logins(p_usernames TEXT)
 RETURNS TABLE(deleted INT) AS $$
 DECLARE
   v_count INT;
@@ -18,4 +18,5 @@ BEGIN
   GET DIAGNOSTICS v_count = ROW_COUNT;
   RETURN QUERY SELECT v_count;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = credentials, event_management, public;

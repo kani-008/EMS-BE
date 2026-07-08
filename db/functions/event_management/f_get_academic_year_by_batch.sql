@@ -1,5 +1,5 @@
-DROP FUNCTION IF EXISTS sp_get_academic_year_by_batch(VARCHAR);
-CREATE OR REPLACE FUNCTION sp_get_academic_year_by_batch(p_batch VARCHAR)
+DROP FUNCTION IF EXISTS event_management.sp_get_academic_year_by_batch(VARCHAR);
+CREATE OR REPLACE FUNCTION event_management.sp_get_academic_year_by_batch(p_batch VARCHAR)
 RETURNS TABLE(academic_year_id VARCHAR, academic_year VARCHAR) AS $$
 BEGIN
   RETURN QUERY
@@ -7,4 +7,5 @@ BEGIN
   WHERE ay.academic_year_id = ('AY' || p_batch)
   LIMIT 1;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = credentials, event_management, public;

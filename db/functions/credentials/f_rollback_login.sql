@@ -7,9 +7,9 @@
 -- Database: credentials
 -- Node call:  SELECT * FROM sp_rollback_login($1);
 
-DROP FUNCTION IF EXISTS sp_rollback_login(VARCHAR);
+DROP FUNCTION IF EXISTS credentials.sp_rollback_login(VARCHAR);
 
-CREATE OR REPLACE FUNCTION sp_rollback_login(p_username VARCHAR)
+CREATE OR REPLACE FUNCTION credentials.sp_rollback_login(p_username VARCHAR)
 RETURNS TABLE(deleted INT) AS $$
 DECLARE
   v_count INT;
@@ -18,4 +18,5 @@ BEGIN
   GET DIAGNOSTICS v_count = ROW_COUNT;
   RETURN QUERY SELECT v_count;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = credentials, event_management, public;

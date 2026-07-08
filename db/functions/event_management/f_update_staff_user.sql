@@ -1,6 +1,6 @@
-DROP FUNCTION IF EXISTS sp_update_staff_user(VARCHAR,VARCHAR,VARCHAR,INT,VARCHAR,INT,VARCHAR,VARCHAR);
+DROP FUNCTION IF EXISTS event_management.sp_update_staff_user(VARCHAR,VARCHAR,VARCHAR,INT,VARCHAR,INT,VARCHAR,VARCHAR);
 
-CREATE OR REPLACE FUNCTION sp_update_staff_user(
+CREATE OR REPLACE FUNCTION event_management.sp_update_staff_user(
   p_faculty_id    VARCHAR,
   p_first_name    VARCHAR,
   p_last_name     VARCHAR,
@@ -50,4 +50,5 @@ BEGIN
   p_success := TRUE;
   p_message := format('Staff updated successfully: %s', p_faculty_id);
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = credentials, event_management, public;

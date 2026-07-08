@@ -1,5 +1,5 @@
-DROP FUNCTION IF EXISTS sp_get_department_id_by_name(VARCHAR);
-CREATE OR REPLACE FUNCTION sp_get_department_id_by_name(p_department_name VARCHAR)
+DROP FUNCTION IF EXISTS event_management.sp_get_department_id_by_name(VARCHAR);
+CREATE OR REPLACE FUNCTION event_management.sp_get_department_id_by_name(p_department_name VARCHAR)
 RETURNS TABLE(department_id INT, department_name VARCHAR) AS $$
 BEGIN
   RETURN QUERY
@@ -7,4 +7,5 @@ BEGIN
   WHERE d.department_name = p_department_name
   LIMIT 1;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = credentials, event_management, public;

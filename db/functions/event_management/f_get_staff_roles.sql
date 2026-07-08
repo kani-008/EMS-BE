@@ -1,5 +1,5 @@
-DROP FUNCTION IF EXISTS sp_get_staff_roles();
-CREATE OR REPLACE FUNCTION sp_get_staff_roles()
+DROP FUNCTION IF EXISTS event_management.sp_get_staff_roles();
+CREATE OR REPLACE FUNCTION event_management.sp_get_staff_roles()
 RETURNS TABLE(user_role_id VARCHAR, user_role VARCHAR) AS $$
 BEGIN
   RETURN QUERY
@@ -7,4 +7,5 @@ BEGIN
   WHERE UPPER(ur.user_role) != 'STUDENT'
   ORDER BY ur.user_role ASC;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = credentials, event_management, public;

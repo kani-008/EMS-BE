@@ -3,9 +3,9 @@
 -- Database: event_management
 -- Node call:  SELECT * FROM sp_validate_batch_and_year($1,$2,$3);
 
-DROP FUNCTION IF EXISTS sp_validate_batch_and_year(INT, VARCHAR, INT);
+DROP FUNCTION IF EXISTS event_management.sp_validate_batch_and_year(INT, VARCHAR, INT);
 
-CREATE OR REPLACE FUNCTION sp_validate_batch_and_year(
+CREATE OR REPLACE FUNCTION event_management.sp_validate_batch_and_year(
   p_batch INT,
   p_course VARCHAR,
   p_current_calendar_year INT,
@@ -40,4 +40,5 @@ BEGIN
     p_message := 'Valid';
   END IF;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = credentials, event_management, public;

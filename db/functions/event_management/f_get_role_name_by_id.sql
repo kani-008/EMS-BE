@@ -9,8 +9,8 @@
 -- Database: event_management
 -- Node call:  SELECT * FROM sp_get_role_name_by_id($1);
 
-DROP FUNCTION IF EXISTS sp_get_role_name_by_id(VARCHAR);
-CREATE OR REPLACE FUNCTION sp_get_role_name_by_id(p_role_id VARCHAR)
+DROP FUNCTION IF EXISTS event_management.sp_get_role_name_by_id(VARCHAR);
+CREATE OR REPLACE FUNCTION event_management.sp_get_role_name_by_id(p_role_id VARCHAR)
 RETURNS TABLE(user_role_id VARCHAR, user_role VARCHAR) AS $$
 BEGIN
   RETURN QUERY
@@ -18,4 +18,5 @@ BEGIN
   WHERE ur.user_role_id = p_role_id
   LIMIT 1;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = credentials, event_management, public;

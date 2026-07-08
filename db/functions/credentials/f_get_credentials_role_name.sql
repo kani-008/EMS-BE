@@ -7,9 +7,9 @@
 -- Database: credentials
 -- Node call:  SELECT * FROM sp_get_credentials_role_name($1);
 
-DROP FUNCTION IF EXISTS sp_get_credentials_role_name(VARCHAR);
+DROP FUNCTION IF EXISTS credentials.sp_get_credentials_role_name(VARCHAR);
 
-CREATE OR REPLACE FUNCTION sp_get_credentials_role_name(p_role_id VARCHAR)
+CREATE OR REPLACE FUNCTION credentials.sp_get_credentials_role_name(p_role_id VARCHAR)
 RETURNS TABLE(role_id VARCHAR, role_name VARCHAR) AS $$
 BEGIN
   RETURN QUERY
@@ -18,4 +18,5 @@ BEGIN
   WHERE tr.role_id = p_role_id
   LIMIT 1;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = credentials, event_management, public;

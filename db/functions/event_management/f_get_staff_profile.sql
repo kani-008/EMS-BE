@@ -1,5 +1,5 @@
-DROP FUNCTION IF EXISTS sp_get_staff_profile(VARCHAR);
-CREATE OR REPLACE FUNCTION sp_get_staff_profile(p_username VARCHAR)
+DROP FUNCTION IF EXISTS event_management.sp_get_staff_profile(VARCHAR);
+CREATE OR REPLACE FUNCTION event_management.sp_get_staff_profile(p_username VARCHAR)
 RETURNS TABLE(
   faculty_id VARCHAR, user_name VARCHAR, first_name VARCHAR, last_name VARCHAR,
   gender VARCHAR, contact VARCHAR, department_id INT, department_name VARCHAR,
@@ -21,4 +21,5 @@ BEGIN
   WHERE uf.user_name = p_username
   LIMIT 1;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = credentials, event_management, public;

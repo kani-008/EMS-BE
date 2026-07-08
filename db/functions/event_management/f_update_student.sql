@@ -3,9 +3,9 @@
 -- Database: event_management
 -- Node call:  SELECT * FROM sp_update_student($1,...,$7);
 
-DROP FUNCTION IF EXISTS sp_update_student(VARCHAR,VARCHAR,VARCHAR,VARCHAR,VARCHAR,VARCHAR,VARCHAR);
+DROP FUNCTION IF EXISTS event_management.sp_update_student(VARCHAR,VARCHAR,VARCHAR,VARCHAR,VARCHAR,VARCHAR,VARCHAR);
 
-CREATE OR REPLACE FUNCTION sp_update_student(
+CREATE OR REPLACE FUNCTION event_management.sp_update_student(
   p_advisor_username VARCHAR,
   p_roll_no          VARCHAR,
   p_first_name       VARCHAR,
@@ -36,7 +36,7 @@ BEGIN
   v_table_name := 'user_student_' || LOWER(REGEXP_REPLACE(v_dept_name, '[^A-Za-z0-9]', '', 'g'));
 
   SELECT EXISTS (
-    SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = v_table_name
+    SELECT 1 FROM information_schema.tables WHERE table_schema = 'event_management' AND table_name = v_table_name
   ) INTO v_exists;
   IF NOT v_exists THEN
     p_success := FALSE; p_message := 'Student table does not exist'; RETURN;
@@ -60,4 +60,5 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
   p_success := FALSE; p_message := SQLERRM;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = credentials, event_management, public;

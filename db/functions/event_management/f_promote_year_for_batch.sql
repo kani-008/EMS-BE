@@ -4,9 +4,9 @@
 -- Database: event_management
 -- Node call:  SELECT * FROM sp_promote_year_for_batch($1,$2);
 
-DROP FUNCTION IF EXISTS sp_promote_year_for_batch(VARCHAR,VARCHAR);
+DROP FUNCTION IF EXISTS event_management.sp_promote_year_for_batch(VARCHAR,VARCHAR);
 
-CREATE OR REPLACE FUNCTION sp_promote_year_for_batch(
+CREATE OR REPLACE FUNCTION event_management.sp_promote_year_for_batch(
   p_batch           VARCHAR,
   p_department_name VARCHAR,
   OUT p_success        BOOLEAN,
@@ -23,7 +23,7 @@ BEGIN
   v_table_name := 'user_student_' || LOWER(REGEXP_REPLACE(p_department_name, '[^A-Za-z0-9]', '', 'g'));
 
   SELECT EXISTS (
-    SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = v_table_name
+    SELECT 1 FROM information_schema.tables WHERE table_schema = 'event_management' AND table_name = v_table_name
   ) INTO v_exists;
   IF NOT v_exists THEN
     p_success := FALSE; p_message := 'Student table not found'; p_affected_count := 0; RETURN;
@@ -63,4 +63,5 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
   p_success := FALSE; p_message := SQLERRM; p_affected_count := 0;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = credentials, event_management, public;

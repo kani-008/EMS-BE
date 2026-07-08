@@ -3,9 +3,9 @@
 -- Database: event_management
 -- Node call:  SELECT * FROM sp_get_student_profile($1);
 
-DROP FUNCTION IF EXISTS sp_get_student_profile(VARCHAR);
+DROP FUNCTION IF EXISTS event_management.sp_get_student_profile(VARCHAR);
 
-CREATE OR REPLACE FUNCTION sp_get_student_profile(p_username VARCHAR)
+CREATE OR REPLACE FUNCTION event_management.sp_get_student_profile(p_username VARCHAR)
 RETURNS TABLE(
   roll_no VARCHAR, user_name VARCHAR, first_name VARCHAR, last_name VARCHAR, gender VARCHAR,
   registration_no VARCHAR, course VARCHAR, current_year INT, semester INT, batch VARCHAR,
@@ -18,7 +18,7 @@ DECLARE
 BEGIN
   FOR v_table IN
     SELECT table_name FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_name LIKE 'user\_student\_%'
+    WHERE table_schema = 'event_management' AND table_name LIKE 'user\_student\_%'
   LOOP
     EXECUTE format('SELECT COUNT(*) FROM %I WHERE user_name = $1', v_table.table_name)
       INTO v_found USING p_username;
@@ -41,4 +41,5 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
   RETURN;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = credentials, event_management, public;

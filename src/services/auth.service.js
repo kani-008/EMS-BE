@@ -1,5 +1,5 @@
 // backend/src/services/auth.service.js
-const { authPool, eventPool, callProcedure } = require("../config/db");
+const { authPool, callProcedure } = require("../config/db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 
@@ -12,22 +12,11 @@ const jwt = require("jsonwebtoken");
 // R06 = PLACEMENT (event_management.user_role). Every real admin login was
 // silently being tagged "SPORTS".
 //
-// Fix: resolve the role name from the database at login time, embed the
-// correct name in the JWT, and have auth.middleware.js simply trust that
-// signed value on every subsequent request instead of re-deriving it from
-// a hardcoded table.
+// Fix: sp_login_user now resolves the role name in the same query (a real
+// cross-schema join, since credentials/event_management are schemas in one
+// Supabase database), so there's no separate lookup step here anymore —
+// just embed whatever the DB says into the JWT, once, at login.
 // ─────────────────────────────────────────────────────────────────────────────
-async function resolveRoleName(roleId) {
-  const rows = await callProcedure(eventPool, "sp_get_role_name_by_id", [roleId]);
-  if (rows && rows.length > 0) return rows[0].user_role;
-
-  // ADMIN (R08) isn't in event_management.user_role — it only exists in
-  // credentials.table_role.
-  const credRows = await callProcedure(authPool, "sp_get_credentials_role_name", [roleId]);
-  if (credRows && credRows.length > 0) return credRows[0].role_name;
-
-  return "UNKNOWN";
-}
 
 class AuthError extends Error {
   constructor(message, statusCode = 400, code = "AUTH_ERROR") {
@@ -71,7 +60,7 @@ exports.login = async (username, password) => {
     throw new AuthError("Invalid username or password", 401, "INVALID_CREDENTIALS");
   }
 
-  const roleName = await resolveRoleName(user.user_role_id);
+  const roleName = user.role_name || "UNKNOWN";
 
   const jwtSecret = process.env.JWT_SECRET;
   if (!jwtSecret) {

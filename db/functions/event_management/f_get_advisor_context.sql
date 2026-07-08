@@ -6,9 +6,9 @@
 -- Database: event_management
 -- Node call:  SELECT * FROM sp_get_advisor_context($1);
 
-DROP FUNCTION IF EXISTS sp_get_advisor_context(VARCHAR);
+DROP FUNCTION IF EXISTS event_management.sp_get_advisor_context(VARCHAR);
 
-CREATE OR REPLACE FUNCTION sp_get_advisor_context(p_advisor_username VARCHAR)
+CREATE OR REPLACE FUNCTION event_management.sp_get_advisor_context(p_advisor_username VARCHAR)
 RETURNS TABLE(
   department_id     INT,
   department_name   VARCHAR,
@@ -65,4 +65,5 @@ BEGIN
   WHERE uf.user_name = p_advisor_username
   LIMIT 1;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = credentials, event_management, public;

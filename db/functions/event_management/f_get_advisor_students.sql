@@ -4,9 +4,9 @@
 -- Database: event_management
 -- Node call:  SELECT * FROM sp_get_advisor_students($1);
 
-DROP FUNCTION IF EXISTS sp_get_advisor_students(VARCHAR);
+DROP FUNCTION IF EXISTS event_management.sp_get_advisor_students(VARCHAR);
 
-CREATE OR REPLACE FUNCTION sp_get_advisor_students(p_advisor_username VARCHAR)
+CREATE OR REPLACE FUNCTION event_management.sp_get_advisor_students(p_advisor_username VARCHAR)
 RETURNS TABLE(
   s_no INT, roll_no VARCHAR, registration_no VARCHAR, first_name VARCHAR, last_name VARCHAR,
   user_name VARCHAR, gender VARCHAR, contact VARCHAR, academic_year_id VARCHAR,
@@ -35,7 +35,7 @@ BEGIN
 
   SELECT EXISTS (
     SELECT 1 FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_name = v_table_name
+    WHERE table_schema = 'event_management' AND table_name = v_table_name
   ) INTO v_exists;
 
   IF NOT v_exists THEN
@@ -55,4 +55,5 @@ BEGIN
     v_table_name
   ) USING v_batch;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = credentials, event_management, public;

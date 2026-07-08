@@ -365,20 +365,17 @@ exports.getUsersService = async (req) => {
   if (!eventUsers || eventUsers.length === 0)
     return { success: true, data: [], total: 0 };
 
-  // Postgres can't join across the two databases the way the old MySQL
-  // stored procedure did, so the role-name lookup is done here in JS:
-  // fetch raw credential rows + role names separately, then merge.
-  const credRows  = await callProcedure(authPool, "sp_get_all_credentials", []);
-  const roleRows  = await callProcedure(eventPool, "sp_get_staff_roles", []); // excludes STUDENT
-  const allRoles  = await eventPool.query("SELECT user_role_id, user_role FROM user_role");
-  const roleNameById = {};
-  allRoles.rows.forEach((r) => { roleNameById[r.user_role_id] = r.user_role; });
+  // sp_get_all_credentials now does a real cross-schema join (credentials +
+  // event_management are schemas in one Supabase database) and returns
+  // user_role_name directly, so no extra round trips or JS-side merging of
+  // role names are needed here anymore.
+  const credRows = await callProcedure(authPool, "sp_get_all_credentials", []);
 
   const credMap = {};
   (credRows || []).forEach((c) => {
     credMap[c.user_name] = {
       status:   c.status,
-      userRole: roleNameById[c.user_role_id] || "Unknown",
+      userRole: c.user_role_name || "Unknown",
     };
   });
 

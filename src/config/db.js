@@ -1,12 +1,17 @@
 // backend/src/config/db.js
-// Postgres version — replaces mysql2/promise with `pg`.
+// Supabase version — ONE Postgres database, two schemas (credentials,
+// event_management) instead of the two-separate-Postgres-databases version
+// of this migration.
 //
-// Architecture unchanged from the MySQL version: two separate database
-// connections (credentials, event_management), each its own Pool, because
-// Postgres — like MySQL — cannot do cross-database queries/transactions
-// without an extension (postgres_fdw/dblink). The distributed-rollback
-// pattern in admin.service.js therefore stays exactly as it was: app-level
-// compensation, not a real two-phase commit.
+// authPool and eventPool are kept as two exported names purely so none of
+// the existing service-layer code (admin.service.js, staff.service.js,
+// student.service.js, auth.service.js, ...) has to change — they both just
+// point at the SAME underlying pool now. Every connection in that pool has
+// its search_path set to look through both schemas, so all the existing
+// unqualified table names (table_login, user_faculty, department, ...) and
+// function names (sp_login_user, sp_get_departments, ...) keep resolving
+// correctly without being rewritten schema.table everywhere. There's no
+// name collision between the two schemas, so this is safe.
 const { Pool } = require("pg");
 
 function assertValidProcedureName(procName) {
@@ -16,12 +21,9 @@ function assertValidProcedureName(procName) {
 }
 
 /**
- * callProcedure — calls a Postgres function that either RETURNS TABLE(...)
- * or has OUT parameters (or both). Either way, Postgres lets you call it as
- * a normal set-returning expression, so a single
- *   SELECT * FROM proc_name($1, $2, ...)
- * gets everything back in one round trip — no more two-step
- * "CALL proc(...,@out)" + "SELECT @out" dance that MySQL needed.
+ * callProcedure — calls a Postgres function that RETURNS TABLE(...) and/or
+ * has OUT parameters. A single `SELECT * FROM proc_name($1,$2,...)` gets
+ * everything back in one round trip.
  */
 async function callProcedure(pool, procName, params = []) {
   assertValidProcedureName(procName);
@@ -31,55 +33,54 @@ async function callProcedure(pool, procName, params = []) {
   return rows;
 }
 
-/**
- * DB 1: Credentials (Authentication)
- */
-const authPool = new Pool({
-  host: process.env.AUTH_DB_HOST || "localhost",
-  port: parseInt(process.env.AUTH_DB_PORT || "5432", 10),
-  user: process.env.AUTH_DB_USER || "postgres",
-  password: process.env.AUTH_DB_PASSWORD || "",
-  database: process.env.AUTH_DB_NAME || "credentials",
-  max: parseInt(process.env.AUTH_DB_POOL_MAX || "10", 10),
+// Supabase requires SSL. If you've downloaded Supabase's CA certificate you
+// can pass it via ca: instead of disabling verification — rejectUnauthorized
+// is set to false here to keep local setup simple; tighten this for
+// production if you want full certificate validation.
+const sslConfig = process.env.DB_SSL === "false" ? false : { rejectUnauthorized: false };
+
+const poolConfig = process.env.DATABASE_URL
+  ? {
+      connectionString: process.env.DATABASE_URL,
+      ssl: sslConfig,
+      max: parseInt(process.env.DB_POOL_MAX || "10", 10),
+    }
+  : {
+      host:     process.env.DB_HOST || "localhost",
+      port:     parseInt(process.env.DB_PORT || "5432", 10),
+      user:     process.env.DB_USER || "postgres",
+      password: process.env.DB_PASSWORD || "",
+      database: process.env.DB_NAME || "postgres",
+      ssl:      sslConfig,
+      max:      parseInt(process.env.DB_POOL_MAX || "10", 10),
+    };
+
+const pool = new Pool(poolConfig);
+
+// Pin search_path on every new connection so unqualified names resolve
+// across both schemas regardless of what the Supabase project's default is.
+pool.on("connect", (client) => {
+  client.query("SET search_path TO credentials, event_management, public");
 });
 
-authPool.on("error", (err) => {
-  console.error("❌ Unexpected Postgres authPool error:", err.message);
+pool.on("error", (err) => {
+  console.error("❌ Unexpected Postgres pool error:", err.message);
 });
 
-/**
- * DB 2: Event_Management (Academic & Operational Data)
- */
-const eventPool = new Pool({
-  host: process.env.EVENT_DB_HOST || "localhost",
-  port: parseInt(process.env.EVENT_DB_PORT || "5432", 10),
-  user: process.env.EVENT_DB_USER || "postgres",
-  password: process.env.EVENT_DB_PASSWORD || "",
-  database: process.env.EVENT_DB_NAME || "event_management",
-  max: parseInt(process.env.EVENT_DB_POOL_MAX || "10", 10),
-});
+// Kept as two names for compatibility with existing service-layer imports —
+// both point at the same pool/database now.
+const authPool = pool;
+const eventPool = pool;
 
-eventPool.on("error", (err) => {
-  console.error("❌ Unexpected Postgres eventPool error:", err.message);
-});
-
-/**
- * connectDB — Verify both Postgres pools can reach their databases at startup.
- */
 const connectDB = async () => {
   try {
-    const authClient = await authPool.connect();
-    await authClient.query("SELECT 1");
-    authClient.release();
-    console.log("✅ Auth DB (credentials) connected");
-
-    const eventClient = await eventPool.connect();
-    await eventClient.query("SELECT 1");
-    eventClient.release();
-    console.log("✅ Event DB (event_management) connected");
+    const client = await pool.connect();
+    await client.query("SELECT 1");
+    client.release();
+    console.log("✅ Connected to Supabase (credentials + event_management schemas)");
   } catch (err) {
     console.error("❌ Postgres connection failed:", err.message);
-    console.error("Ensure both databases are running and credentials are correct.");
+    console.error("Check DATABASE_URL / DB_HOST / DB_PASSWORD and that the project is not paused.");
     process.exit(1);
   }
 };
