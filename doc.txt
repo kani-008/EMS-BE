@@ -1,0 +1,407 @@
+================================================================================
+GCE EVENT TRACKER — FULL SYSTEM DOCUMENTATION & ARCHITECTURAL OVERVIEW
+================================================================================
+
+This document provides a highly detailed, comprehensive, and elaborate technical overview
+of the GCE Event Tracker application. It spans the Database Layer, Backend Server,
+and Frontend React Client, detailing the architecture, directories, key files,
+data flows, and structural design choices.
+
+--------------------------------------------------------------------------------
+1. SYSTEM ARCHITECTURE & DESIGN HIGHLIGHTS
+--------------------------------------------------------------------------------
+The GCE Event Tracker is designed around a three-tier model:
+- Frontend: Single-page React application built with Vite, utilizing React Router
+  for client-side routing, Axios for HTTP communication, and Tailwind CSS for styles.
+- Backend: RESTful Node.js + Express API server, implementing JWT-based authentication
+  via HTTP-only cookies and application-level routing.
+- Database: Dual-Database MySQL setup using connection pooling and relying strictly on
+  Stored Procedures for transactional safety and structural abstraction.
+
+Key Architectural Decisions:
+1. Dual Database Isolation:
+   - Credentials DB: Houses sensitive login credentials and authorization states.
+   - Event Management DB: Houses student profiles, faculty/advisor context, and
+     event tracking operational data.
+   - This reduces access vectors for credential dumping and segregates sensitive
+     auth data from broad operational queries.
+2. Dynamic Student Tables:
+   - Instead of storing thousands of student records in a single flat table,
+     the database dynamically generates partitions on a per-batch, per-department
+     basis (e.g., `user_student_2023_cse`).
+   - This keeps individual tables small, optimizes indexes, facilitates clean
+     purging/archival, and prevents locking overhead.
+3. Stored Procedure Enforced Query Pattern:
+   - The backend contains NO inline raw SQL strings for business logic.
+   - All queries, mutations, and structural steps are delegated to MySQL Stored
+     Procedures. The backend communicates exclusively by invoking `CALL sp_name(?, ?)`.
+4. HTTP-Only Cookie Session Management:
+   - JWT tokens are stored in secure, `HttpOnly`, `SameSite=Lax` cookies, preventing
+     Cross-Site Scripting (XSS) token theft.
+
+================================================================================
+2. DATABASE LAYER (db/)
+================================================================================
+The `db/` folder contains schemas and procedural scripts to build and seed the system.
+
+📁 db/
+├── credentials-fixed.sql         # Schema & seed data for Credentials DB
+├── event_management-fixed.sql    # Schema & seed data for Event Management DB
+├── migrations/                   # Database version migration scripts
+└── procedures/                   # MySQL Stored Procedure SQL files
+    ├── sp_bulk_create_staff.sql
+    ├── sp_create_staff_user.sql
+    ├── sp_create_student.sql
+    ├── sp_create_student_user.sql
+    ├── sp_get_academic_year_by_batch.sql
+    ├── sp_get_advisor_context.sql
+    ├── sp_get_advisor_students.sql
+    ├── sp_get_all_credentials.sql
+    ├── sp_get_all_users.sql
+    ├── sp_get_department_id_by_name.sql
+    ├── sp_get_departments.sql
+    ├── sp_get_role_id_by_name.sql
+    ├── sp_get_staff_profile.sql
+    ├── sp_get_staff_roles.sql
+    ├── sp_get_student_profile.sql
+    ├── sp_get_user_by_username.sql
+    ├── sp_insert_login.sql
+    ├── sp_login_user.sql
+    ├── sp_promote_year_for_batch.sql
+    ├── sp_update_staff_profile.sql
+    ├── sp_update_staff_user.sql
+    ├── sp_update_student.sql
+    ├── sp_update_student_profile.sql
+    └── sp_validate_batch_and_year.sql
+
+--------------------------------------------------------------------------------
+2.1 Databases & Tables Detail
+--------------------------------------------------------------------------------
+
+A. Database: `credentials`
+---------------------------
+Exclusively manages authentication. Holds user credentials, login states, and roles.
+- `table_login`:
+  * `s_no` (INT, PK, Auto-increment)
+  * `user_name` (VARCHAR(255), Unique) - Used as the login ID (lowercase roll number or staff name)
+  * `password` (VARCHAR(255)) - Blowfish Crypt (bcrypt) password hash
+  * `user_role_id` (VARCHAR(50)) - FK to `table_role` / `user_role`
+  * `department_id` (INT, Nullable) - FK referencing the academic department ID
+  * `status` (VARCHAR(50), Default 'ACTIVE') - Active/Inactive toggle
+  * `last_updated_by` / `last_updated_on`
+- `table_role`:
+  * Simple static mapping. R08 is mapped here as 'ADMIN' (which operates outside typical academic roles).
+
+B. Database: `event_management`
+--------------------------------
+Contains academic taxonomy and student/staff metadata.
+- `department`:
+  * Maps 3-digit identifiers to departments (e.g., 104 = CSE, 106 = ECE, 114 = MECH).
+  * Fields: `department_id` (Unique PK), `department_name`, `department_hod`, etc.
+- `academic_year`:
+  * Tracks cohorts. Fields: `academic_year_id` (e.g., 'AY2023'), `academic_year` (e.g., '2023-2027'),
+    and a JSON field `department_list` representing active departments in that year.
+- `user_role`:
+  * Roles: R01 (STUDENT), R02 (FACULTY), R03 (ADVISOR), R04 (HOD), R05 (PRINCIPAL),
+    R06 (PLACEMENT), R07 (SPORTS).
+- `user_faculty`:
+  * Holds details of academic employees.
+  * Fields: `faculty_id` (PK, e.g., 'FAC101'), `first_name`, `last_name`, `user_name`,
+    `gender`, `contact`, `user_role_id`, `academic_year_id`, `department_id`,
+    `current_year` (active year assigned, e.g., 3), `batch` (assigned batch, e.g. '2023').
+- Dynamic Student Tables (`user_student_{batch}_{dept_name}`):
+  * E.g., `user_student_2023_cse`.
+  * Fields: `roll_no` (PK), `user_name` (Unique), `registration_no`, `first_name`, `last_name`,
+    `gender`, `academic_year_id`, `department_id`, `course`, `current_year` (1-4),
+    `semester` (1-8), `batch`, `status`, `created_on`, `last_updated_by`.
+
+--------------------------------------------------------------------------------
+2.2 Key Stored Procedures Analyzed
+--------------------------------------------------------------------------------
+
+1. `sp_create_student`
+   - Inputs: Advisor username, Roll number, Name, Gender, Reg No, Course, Semester.
+   - Process:
+     * Resolves the advisor's department, batch, and assigned academic year.
+     * Computes the current student year based on batch: `YEAR(CURDATE()) - batch + 1`.
+     * Dynamically builds the table name: `user_student_{batch}_{dept}`.
+     * Executes dynamic DDL `CREATE TABLE IF NOT EXISTS...` for that table if it doesn't exist.
+     * Checks if the roll number already exists.
+     * Inserts the student record.
+     * Returns success flag, message, derived username (lowercase roll number), and target table name.
+
+2. `sp_get_student_profile`
+   - Inputs: Username.
+   - Process:
+     * Scans the system tables. Declares a cursor over `information_schema.tables` where the schema
+       is `event_management` and the table name matches `user_student_%`.
+     * For each table found, runs a dynamic SQL COUNT query to check if `user_name = username`.
+     * If found, executes a dynamic select query joining the student table with the `department`
+       table and returns the profile immediately.
+
+3. `sp_bulk_create_staff`
+   - Inputs: Name, Gender, Role Name, Department, Batch, Course, Current Year, Creator username.
+   - Process:
+     * Generates a unique username by sanitizing `firstname + lastname` and checking for collisions,
+       appending numeric suffixes (e.g. `vasuki`, `vasuki1`, `vasuki2`) if necessary.
+     * Maps the role name to `user_role_id`.
+     * Scans `user_faculty` to find the highest `FAC###` identifier, increments it, and assigns it.
+     * Normalizes inputs and inserts into `user_faculty`.
+
+4. `sp_promote_year_for_batch`
+   - Inputs: Batch, Department ID, Current Year, Target Year, Semester.
+   - Process:
+     * Dynamically locates the student table `user_student_{batch}_{dept}`.
+     * Runs dynamic SQL updates incrementing `current_year` and `semester` for active students.
+
+================================================================================
+3. BACKEND LAYER (backend/)
+================================================================================
+Built on Node.js and Express. Exposes API endpoints and delegates logic to services.
+
+📁 backend/
+├── .env                          # Environment variables
+├── package.json                  # Node dependencies and scripts
+└── src/
+    ├── app.js                    # Express Application setup & booting
+    ├── config/
+    │   └── db.js                 # Dual Pool Database connection utility
+    ├── Middleware/
+    │   └── auth.middleware.js    # JWT verification & role authorization
+    ├── Routes/
+    │   ├── admin.routes.js       # Admin routes
+    │   ├── auth.routes.js        # Authentication endpoints
+    │   ├── common.routes.js      # General utilities
+    │   ├── staff.routes.js       # Delegates to modules/staff
+    │   └── student.routes.js     # Delegates to modules/students
+    ├── controllers/
+    │   ├── admin.controller.js
+    │   └── auth.controller.js
+    ├── modules/                  # Segmented business logic modules
+    │   ├── staff/
+    │   │   ├── staff.controller.js
+    │   │   ├── staff.routes.js
+    │   │   └── staff.service.js
+    │   └── students/
+    │       ├── student.controller.js
+    │       ├── student.routes.js
+    │       └── student.service.js
+    └── services/
+        ├── admin.service.js
+        ├── auth.service.js
+        └── user.service.js
+
+--------------------------------------------------------------------------------
+3.1 Database Configuration (`src/config/db.js`)
+--------------------------------------------------------------------------------
+- Configures two distinct pools:
+  * `authPool` pointing to the `credentials` database.
+  * `eventPool` pointing to the `event_management` database.
+- Implements `callProcedure(pool, procName, params)`:
+  * Sanitizes the procedure name with a strict regex (`/^[A-Za-z0-9_]+$/`).
+  * Prepares dynamic parameter placeholders: `CALL procName(?, ?, ?)`.
+  * Runs the procedure and normalizes the double nested array result set that MySQL
+    stored procedures return.
+
+--------------------------------------------------------------------------------
+3.2 Authentication & Middleware (`src/Middleware/auth.middleware.js`)
+--------------------------------------------------------------------------------
+- Role Map: Maps database codes to frontend readable strings:
+  `R01` -> STUDENT, `R02` -> FACULTY, `R03` -> ADVISOR, `R04` -> HOD,
+  `R05` -> PRINCIPAL, `R06` -> PLACEMENT, `R07` -> SPORTS, `R08` -> ADMIN.
+- `verifyToken`:
+  * Extracts JWT from either the `Authorization` header (`Bearer <token>`) or the
+    HTTP-only cookie named `token`.
+  * Verifies it against `process.env.JWT_SECRET`.
+  * Sets `req.user` with decoded properties (username, mapped role, roleId, department_id, status).
+- `allowRoles(...roles)`:
+  * A closure-based middleware factory. Compares the list of allowed roles with `req.user.role`.
+  * Blocks with 403 Forbidden if not authorized.
+
+--------------------------------------------------------------------------------
+3.3 API Modules & Services
+--------------------------------------------------------------------------------
+
+A. Authentication Module
+------------------------
+- Route: `/api/auth`
+- Controllers: `login`, `logout`, `getMe`
+- Logic:
+  * `login`: Calls `sp_login_user` to get user status and password hash. Validates via
+    `bcrypt.compare`. Signs a JWT containing role, username, and department ID. Sets it as
+    an HTTP-only, secure cookie (`token`).
+  * `logout`: Clears the `token` cookie.
+  * `getMe`: Returns token payload details, joins department info from the `department` table,
+    and grabs advisor specifics (batch, assigned year) from `user_faculty` if the user is an advisor.
+
+B. Staff Module (`src/modules/staff/`)
+--------------------------------------
+- Route: `/api/staff`
+- Sub-Controllers & Services:
+  * `getAdvisorContext`: Grabs active advisor context (batch, department ID).
+  * `getAdvisorStudents`: Scans and queries the dynamic student table corresponding to the advisor.
+  * `createStudentSingle`: Creates a login in the credentials DB, then runs `sp_create_student`
+    to insert the profile in the dynamic table.
+  * `createStudentsRange`: Generates a batch of students sequentially by incrementing roll numbers
+    (e.g., from `23CSE01` to `23CSE60`) and inserts their accounts.
+  * `createStudentsExcel`: Parses uploaded spreadsheet files using `xlsx` in memory, validates records,
+    and bulk inserts them.
+  * `downloadExcelTemplate`: Sends down a boilerplate Excel template for bulk uploads.
+
+C. Student Module (`src/modules/students/`)
+-------------------------------------------
+- Route: `/api/student`
+- Sub-Controllers & Services:
+  * `getProfile`: Resolves profile by executing `sp_get_student_profile`.
+  * `updateProfile`: Calls `sp_update_student_profile` to overwrite editable properties.
+  * `changePassword`: Compares old password, hashes new password with `bcrypt`, and updates `table_login`.
+
+D. Admin Module
+---------------
+- Route: `/api/admin`
+- Sub-Controllers & Services:
+  * Manages departments list and staff roles.
+  * `createStaff`: Inserts staff credentials and calls `sp_bulk_create_staff` for profiles.
+  * `uploadStaffExcel`: Allows batch import of academic staff.
+  * `promoteYearForBatch`: Executes batch year promotion by invoking `sp_promote_year_for_batch`.
+
+================================================================================
+4. FRONTEND LAYER (frontend/)
+================================================================================
+A React React-Router single-page app (SPA) powered by Vite.
+
+📁 frontend/
+├── index.html                    # Root index template
+├── tailwind.config.js            # Tailwind styling tokens
+├── vite.config.js                # Vite dev server & API proxy configurations
+└── src/
+    ├── App.jsx                   # Central routing & client setup
+    ├── main.jsx                  # React application mount point
+    ├── admin/                    # Admin Portal
+    │   ├── App.jsx               # Sub-routes for Admin panel
+    │   ├── components/           # Admin-specific widgets (Modal, forms)
+    │   ├── layout/               # Sidebar, Header, Page Shells
+    │   └── pages/                # Dashboard, User Admin, Reports, Profile, Settings
+    ├── staff/                    # Staff/Advisor Portal
+    │   ├── App.jsx               # Sub-routes for Staff panel
+    │   ├── layout/               # Sidebar and layouts
+    │   └── pages/                # Advisor Dashboard, Student roster, creation panels
+    ├── student/                  # Student Portal
+    │   ├── App.jsx               # Student sub-routes
+    │   ├── layout/               # Student layout
+    │   └── pages/                # Student profile, request history, dashboard
+    ├── components/               # Global components (ProtectedRoute, etc.)
+    ├── context/
+    │   └── AuthContext.jsx       # Global Auth state supplier
+    ├── services/
+    │   ├── authservice.js        # Axios authentication requests
+    │   └── userService.js        # Deprecated user service
+    └── loginPage/
+        └── Login.jsx             # Unified Login screen
+
+--------------------------------------------------------------------------------
+4.1 Main Entry & Dev Config
+--------------------------------------------------------------------------------
+- Proxy setup in `vite.config.js`:
+  * Re-routes any `/api/*` paths to local backend target `http://127.0.0.1:5000`
+    to bypass cross-origin resource sharing (CORS) limits during development.
+- Entrypoint in `main.jsx` wraps the entire root in `<BrowserRouter>` and `<AuthProvider>`.
+
+--------------------------------------------------------------------------------
+4.2 Routing Structure & Guards (`src/App.jsx`, `src/components/ProtectedRoute.jsx`)
+--------------------------------------------------------------------------------
+- Routing utilizes client-side wildcard matches to compartmentalize portals:
+  * `/login` -> Public unified login panel.
+  * `/student/*` -> Protected by `<ProtectedRoute roles={["STUDENT"]}>`, mounting `StudentApp`.
+  * `/staff/*` -> Protected by `<ProtectedRoute roles={STAFF_ROLES}>` (includes ADVISOR, HOD,
+    PRINCIPAL, FACULTY, PLACEMENT, SPORTS), mounting `StaffApp`.
+  * `/admin/*` -> Protected by `<ProtectedRoute roles={["ADMIN"]}>`, mounting `AdminApp`.
+- `<ProtectedRoute>` behavior:
+  * Listens to the `useAuth()` hook.
+  * If `loading` is true, displays a placeholder screen.
+  * If `user` is null (not logged in), redirects the browser to `/login`.
+  * If the user's role is not within the component's authorized `roles` array, it intercepts
+    the redirect and sends them to their corresponding home portal (e.g. if a student attempts
+    to visit `/admin`, it routes them back to `/student`).
+
+--------------------------------------------------------------------------------
+4.3 Global Auth Context (`src/context/AuthContext.jsx`)
+--------------------------------------------------------------------------------
+- Creates `AuthContext` and hooks it to axios configurations:
+  * `axios.defaults.withCredentials = true;` ensures cookies are implicitly carried
+    along with every REST call.
+- Lifecycle:
+  * On mount, runs `fetchUser()` invoking GET `/api/auth/me`. If a valid token exists
+    in the cookie, the server verifies it, resolves user properties, and returns it.
+  * `login(userData)` is called directly after a successful POST `/api/auth/login` transaction,
+     instantly populating local state without waiting for another API round-trip.
+  * `logout()` calls POST `/api/auth/logout` to clear the cookie, then nullifies user state.
+
+================================================================================
+5. SEQUENCE FLOWS
+================================================================================
+
+--------------------------------------------------------------------------------
+5.1 User Authentication Flow
+--------------------------------------------------------------------------------
+1. User enters username and password in `Login.jsx` and clicks "Sign In".
+2. `Login.jsx` issues a POST `/api/auth/login` with credentials.
+3. Express server receives request, delegates it to `authController.login`,
+   which calls `authService.login(username, password)`.
+4. `authService.login` invokes MySQL stored procedure `sp_login_user` with the username.
+5. The procedure retrieves user info (hashed password, status, role) from `table_login`.
+6. Backend compares the password hash via `bcrypt.compare`.
+7. Upon validation, the service signs a JWT token with user claims.
+8. The controller appends `Set-Cookie: token=<jwt>; HttpOnly; Path=/` to the response.
+9. JSON payload containing user details is returned.
+10. React UI receives response, stores user object in `AuthContext` state, and uses
+    `getRoleRedirect(role)` to push route change (e.g., `/staff/dashboard`).
+
+--------------------------------------------------------------------------------
+5.2 Student Profile Query Flow
+--------------------------------------------------------------------------------
+1. Student navigates to `/student/profile`.
+2. React triggers GET `/api/student/profile` inside `Profile.jsx`.
+3. Express `verifyToken` middleware parses cookie, validates JWT, populates `req.user`,
+   and triggers student `getProfile` controller.
+4. Controller triggers `studentService.getStudentProfileService`.
+5. Service executes `CALL sp_get_student_profile(?)` passing the username.
+6. Database procedure loops over `information_schema.tables` using a cursor to find
+   which dynamic student table (e.g., `user_student_2023_cse`) contains the username.
+7. Procedure pulls details from that dynamic table, left-joining `department`.
+8. Result goes back to service, which merges status info from credentials `table_login`.
+9. Express responds with JSON data, and the React profile page displays the fields.
+
+--------------------------------------------------------------------------------
+5.3 Advisor Dynamic Student Creation Flow
+--------------------------------------------------------------------------------
+1. Advisor opens the student registration form on the staff panel (`/staff/users`).
+2. Page fetches `/api/staff/advisor-context` to restrict department and batch selection.
+3. Advisor inputs single student details (e.g. Roll No: `23CSE42`, First Name: `Ramesh`).
+4. Client posts details to `/api/staff/students/single`.
+5. Express server authorizes request, checks role (`ADVISOR`), and runs controller.
+6. Backend first queries `table_login` to verify the username doesn't exist.
+7. Backend inserts a login credentials row into `credentials.table_login` with a default
+   bcrypt-hashed password.
+8. Backend invokes `CALL sp_create_student(..., @success, @message, @username, @table_name)`.
+9. Database procedure extracts advisor's batch context, builds dynamic table name
+   `user_student_2023_cse` (creating it if not existing), inserts the profile, and returns status.
+10. Backend confirms success and sends 201 Created to the client.
+11. Roster updates automatically to show the new student record.
+
+================================================================================
+6. SUMMARY OF BEST PRACTICES APPLIED
+================================================================================
+- SQL Injection Shielding: Since all data communication is via prepared parameters
+  sent directly to Stored Procedures, raw SQL injection vectors are mitigated.
+- Clean Security Boundaries: The Credentials database remains isolated from the Event
+  Management database. If the operational database is compromised, the actual passwords
+  (which are hashed anyway) are stored in an entirely different db instance.
+- Optimized Indexing: The dynamic table generation limits database table sizes.
+  Scanning dynamic tables is restricted to profile views, while operations like roster
+  loading are fast since advisors load directly from their specific batch + dept table.
+- Modular Organization: Backend code is split into specific modules (staff, students)
+  and global controllers, making feature extensions simple and maintainable.
+- Dynamic Responsive UI: The front-end uses CSS transitions and Tailwind utilities,
+  featuring role-based portal isolation and route guards.
+================================================================================
