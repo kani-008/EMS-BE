@@ -1,10 +1,10 @@
 // backend/src/app.js
-require("dotenv").config({ path: require("path").resolve(__dirname, "../.env") });
+require("dotenv").config({ path: require("path").resolve(__dirname, ".env") });
 
 const express = require("express");
 const cors    = require("cors");
 const cookieParser = require("cookie-parser");
-const { connectDB } = require("./config/db");
+const { connectDB } = require("./src/config/db");
 
 const app = express();
 
@@ -23,10 +23,10 @@ app.use(cookieParser());
 // on case-insensitive filesystems (Windows/Mac). On Linux (any real
 // deployment target, including this one) it throws MODULE_NOT_FOUND and the
 // server never boots. Fixed by standardizing on lowercase `routes/` here.
-const authRoutes    = require("./routes/auth.routes");
-const studentRoutes = require("./routes/student.routes");
-const staffRoutes   = require("./routes/staff.routes");
-const adminRoutes   = require("./routes/admin.routes");
+const authRoutes    = require("./src/routes/auth.routes");
+const studentRoutes = require("./src/routes/student.routes");
+const staffRoutes   = require("./src/routes/staff.routes");
+const adminRoutes   = require("./src/routes/admin.routes");
 
 app.use("/api/auth",    authRoutes);
 app.use("/api/student", studentRoutes);
