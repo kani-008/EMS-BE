@@ -23,10 +23,10 @@ app.use(cookieParser());
 // on case-insensitive filesystems (Windows/Mac). On Linux (any real
 // deployment target, including this one) it throws MODULE_NOT_FOUND and the
 // server never boots. Fixed by standardizing on lowercase `routes/` here.
-const authRoutes    = require("./src/routes/auth.routes");
-const studentRoutes = require("./src/routes/student.routes");
-const staffRoutes   = require("./src/routes/staff.routes");
-const adminRoutes   = require("./src/routes/admin.routes");
+const authRoutes    = require("./src/routes/authroutes");
+const studentRoutes = require("./src/routes/studentroutes");
+const staffRoutes   = require("./src/routes/staffroutes");
+const adminRoutes   = require("./src/routes/adminroutes");
 
 app.use("/api/auth",    authRoutes);
 app.use("/api/student", studentRoutes);

@@ -3,8 +3,8 @@ const express = require("express");
 const multer = require("multer");
 const router = express.Router();
 
-const { verifyToken, allowRoles } = require("../middleware/auth.middleware");
-const staffController = require("../controllers/staff.controller");
+const { verifyToken, allowRoles } = require("../middleware/authmiddleware");
+const staffController = require("../controllers/staffcontroller");
 
 // Setup multer for Excel template upload (max 5 MB)
 const upload = multer({

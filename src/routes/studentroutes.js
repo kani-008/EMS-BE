@@ -2,8 +2,8 @@
 const express = require("express");
 const router = express.Router();
 
-const { verifyToken, allowRoles } = require("../middleware/auth.middleware");
-const studentController = require("../controllers/student.controller");
+const { verifyToken, allowRoles } = require("../middleware/authmiddleware");
+const studentController = require("../controllers/studentcontroller");
 
 // ── Student Dashboard ────────────────────────────────────────────────────────
 router.get(
