@@ -39,11 +39,14 @@ router.get(
   adminController.validateBatch
 );
 
-// ── Student creation (ADVISOR only in practice — batch/dept enforced in SP) ───
+// ── Student creation (ADVISOR only — the service derives department/batch
+//    from the caller's own user_faculty row, so ADMIN can never satisfy
+//    that check; it used to be allowed here too and would just fail with a
+//    confusing 400 "Advisor context not found" instead of a clean 403) ──────
 router.post(
   "/create-users",
   verifyToken,
-  allowRoles("ADVISOR", "ADMIN"),
+  allowRoles("ADVISOR"),
   adminController.createUsers
 );
 
@@ -103,4 +106,4 @@ router.post(
   adminController.promoteYearForBatch
 );
 
-module.exports = router;
+module.exports = router;

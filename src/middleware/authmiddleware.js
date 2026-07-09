@@ -1,5 +1,6 @@
 // backend/src/middleware/auth.middleware.js
 const jwt = require("jsonwebtoken");
+const { authPool } = require("../config/db");
 
 // The hardcoded ROLE_MAP that used to live here (R06→"ADMIN", R08→"SPORTS" —
 // backwards from the real DB data) is gone. auth.service.js now resolves the
@@ -10,6 +11,26 @@ const jwt = require("jsonwebtoken");
 
 function isAuthDebugEnabled() {
   return String(process.env.AUTH_DEBUG || "").toLowerCase() === "true";
+}
+
+// SECURITY: re-check live account status on every request, not just at
+// login. Without this, deactivating a user (admin suspends a student/staff
+// account) has NO effect until their existing JWT expires (up to 24h later)
+// — they keep full access with a still-valid signature the whole time. This
+// is one extra indexed lookup per request (table_login.user_name is
+// indexed), so the latency cost is small; skip it only if you have a
+// caching layer in front of this and understand the revocation-delay
+// trade-off you're taking on. Set SKIP_LIVE_STATUS_CHECK=true to disable.
+async function isAccountActive(username) {
+  if (String(process.env.SKIP_LIVE_STATUS_CHECK || "").toLowerCase() === "true") {
+    return true;
+  }
+  const { rows } = await authPool.query(
+    "SELECT status FROM table_login WHERE user_name = $1 LIMIT 1",
+    [username]
+  );
+  if (!rows || rows.length === 0) return false;
+  return String(rows[0].status || "").toUpperCase() === "ACTIVE";
 }
 
 const verifyToken = async (req, res, next) => {
@@ -33,6 +54,11 @@ const verifyToken = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, jwtSecret);
+
+    const active = await isAccountActive(decoded.username);
+    if (!active) {
+      return res.status(403).json({ success: false, message: "Account is inactive. Please contact admin." });
+    }
 
     req.user = {
       username: decoded.username,
