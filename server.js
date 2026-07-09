@@ -15,14 +15,6 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(cookieParser());
-
-// ── Routes ────────────────────────────────────────────────────────────────────
-// NOTE: this now correctly matches the actual folder name `src/routes`
-// (lowercase). The original repo had this require pointing at "./routes/..."
-// while the folder on disk was "src/Routes/" (capital R) — that only works
-// on case-insensitive filesystems (Windows/Mac). On Linux (any real
-// deployment target, including this one) it throws MODULE_NOT_FOUND and the
-// server never boots. Fixed by standardizing on lowercase `routes/` here.
 const authRoutes    = require("./src/routes/authroutes");
 const studentRoutes = require("./src/routes/studentroutes");
 const staffRoutes   = require("./src/routes/staffroutes");
