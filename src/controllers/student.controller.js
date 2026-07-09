@@ -1,15 +1,12 @@
-// backend/src/modules/students/student.service.js
-// ALL database logic lives in Postgres functions.
-// This file ONLY calls functions for business logic — pg placeholders ($1,$2..)
-// instead of mysql2's `?`.
-
+// backend/src/controllers/student.controller.js
 const bcrypt = require("bcrypt");
-const { authPool, eventPool, callProcedure } = require("../../config/db");
+const { authPool, eventPool, callProcedure } = require("../config/db");
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GET STUDENT PROFILE SERVICE
+// SERVICES (Inlined from student.service.js)
 // ─────────────────────────────────────────────────────────────────────────────
-exports.getStudentProfileService = async (req) => {
+
+async function getStudentProfileService(req) {
   const { username } = req.user;
 
   const rows = await callProcedure(eventPool, "sp_get_student_profile", [username]);
@@ -47,12 +44,9 @@ exports.getStudentProfileService = async (req) => {
       lastUpdatedBy:   p.last_updated_by  || null,
     },
   };
-};
+}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UPDATE STUDENT PROFILE SERVICE
-// ─────────────────────────────────────────────────────────────────────────────
-exports.updateStudentProfileService = async (req, payload) => {
+async function updateStudentProfileService(req, payload) {
   const { username } = req.user;
   const { first_name, last_name, registration_no, gender } = payload;
 
@@ -70,12 +64,9 @@ exports.updateStudentProfileService = async (req, payload) => {
   }
 
   return { success: true, message: "Profile updated successfully" };
-};
+}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CHANGE STUDENT PASSWORD SERVICE
-// ─────────────────────────────────────────────────────────────────────────────
-exports.changeStudentPasswordService = async (req, payload) => {
+async function changeStudentPasswordService(req, payload) {
   const { username } = req.user;
   const { currentPassword, newPassword } = payload;
 
@@ -103,4 +94,54 @@ exports.changeStudentPasswordService = async (req, payload) => {
   );
 
   return { success: true, message: "Password changed successfully" };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONTROLLERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─── GET /api/student/profile ─────────────────────────────────────────────────
+exports.getProfile = async (req, res) => {
+  try {
+    const result = await getStudentProfileService(req);
+    return res.json(result);
+  } catch (err) {
+    console.error("❌ student.getProfile error:", err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ─── PUT /api/student/profile ─────────────────────────────────────────────────
+exports.updateProfile = async (req, res) => {
+  try {
+    const { first_name, last_name, registration_no, gender } = req.body;
+    const result = await updateStudentProfileService(req, {
+      first_name,
+      last_name,
+      registration_no,
+      gender,
+    });
+    return res.json(result);
+  } catch (err) {
+    console.error("❌ student.updateProfile error:", err.message);
+    return res.status(400).json({ success: false, message: err.message });
+  }
+};
+
+// ─── PUT /api/student/profile/password ────────────────────────────────────────
+exports.changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+    if (newPassword && newPassword !== confirmPassword) {
+      return res.status(400).json({ success: false, message: "New passwords do not match" });
+    }
+    const result = await changeStudentPasswordService(req, {
+      currentPassword,
+      newPassword,
+    });
+    return res.json(result);
+  } catch (err) {
+    console.error("❌ student.changePassword error:", err.message);
+    return res.status(400).json({ success: false, message: err.message });
+  }
 };
