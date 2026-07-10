@@ -16,7 +16,7 @@ const upload = multer({
 router.post(
   "/",
   verifyToken,
-  allowRoles("ADVISOR"),
+  allowRoles("ADVISOR", "ADMIN"),
   studentController.createStudents
 );
 
@@ -30,21 +30,21 @@ router.get(
 router.post(
   "/range",
   verifyToken,
-  allowRoles("ADVISOR"),
+  allowRoles("ADVISOR", "ADMIN"),
   studentController.createStudentsRange
 );
 
 router.post(
   "/single",
   verifyToken,
-  allowRoles("ADVISOR"),
+  allowRoles("ADVISOR", "ADMIN"),
   studentController.createStudentSingle
 );
 
 router.post(
   "/excel",
   verifyToken,
-  allowRoles("ADVISOR"),
+  allowRoles("ADVISOR", "ADMIN"),
   upload.single("file"),
   studentController.createStudentsExcel
 );
@@ -52,15 +52,22 @@ router.post(
 router.get(
   "/excel-template",
   verifyToken,
-  allowRoles("ADVISOR"),
+  allowRoles("ADVISOR", "ADMIN"),
   studentController.downloadExcelTemplate
 );
 
 router.put(
   "/:roll_no",
   verifyToken,
-  allowRoles("ADVISOR"),
+  allowRoles("ADVISOR", "ADMIN"),
   studentController.updateStudent
+);
+
+router.patch(
+  "/:roll_no/status",
+  verifyToken,
+  allowRoles("ADVISOR", "ADMIN"),
+  studentController.updateStudentStatus
 );
 
 router.post(

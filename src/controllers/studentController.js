@@ -25,10 +25,85 @@ function validateRange(rangeFrom, rangeTo) {
   return { from, to };
 }
 
-// ── Admin-flow create student batch ──────────────────────────────────────────
+async function validateBatchService(batch, course) {
+  const currentCalendarYear = new Date().getFullYear();
+  const rows = await callProcedure(eventPool, "sp_validate_batch_and_year", [
+    parseInt(batch, 10),
+    String(course).trim(),
+    currentCalendarYear,
+  ]);
+  const outRow = rows[0];
+  const isValid = outRow?.p_is_valid === true;
+
+  return {
+    success:     true,
+    valid:       isValid,
+    currentYear: isValid ? Number(outRow.p_current_year) : null,
+    message:     outRow?.p_message || "",
+  };
+}
+
+async function createOneStudentGeneric({
+  creatorUsername,
+  isAdmin,
+  departmentId,
+  rollNo,
+  firstName,
+  lastName,
+  gender,
+  registrationNo,
+  academicYearId,
+  currentYear,
+  course,
+  semester,
+  batch
+}) {
+  const spName = isAdmin ? "sp_create_student_user_admin" : "sp_create_student_user";
+  const spParams = isAdmin
+    ? [
+        rollNo,
+        rollNo.toLowerCase(),
+        firstName || "",
+        lastName || "",
+        gender || "",
+        registrationNo || "",
+        academicYearId || null,
+        currentYear,
+        course || "",
+        semester || null,
+        batch,
+        departmentId,
+        creatorUsername
+      ]
+    : [
+        creatorUsername,
+        rollNo,
+        rollNo.toLowerCase(),
+        firstName || "",
+        lastName || "",
+        gender || "",
+        registrationNo || "",
+        academicYearId || null,
+        currentYear,
+        course || "",
+        semester || null,
+        batch,
+        creatorUsername
+      ];
+
+  const spRows = await callProcedure(eventPool, spName, spParams);
+  const outRow = spRows[0];
+  if (!outRow || !outRow.p_success) {
+    throw new Error(outRow?.p_message || `${spName} failed`);
+  }
+  return outRow;
+}
+
+// ── Admin/Staff create student batch (Range) ──────────────────────────────────
 async function createUsersService(req, payload) {
-  const advisor = req.user;
-  const { prefix, userType, rangeFrom, rangeTo, course, semester, batch } = payload;
+  const caller = req.user;
+  const isAdmin = caller.role === "ADMIN";
+  const { prefix, userType, rangeFrom, rangeTo, course, semester, batch, department } = payload;
 
   if (!prefix)   throw new Error("prefix is required");
   if (!userType) throw new Error("userType is required");
@@ -39,23 +114,43 @@ async function createUsersService(req, payload) {
 
   const { from, to } = validateRange(rangeFrom, rangeTo);
 
-  const ctxRows = await callProcedure(eventPool, "sp_get_advisor_context", [advisor.username]);
-  if (!ctxRows || ctxRows.length === 0)
-    throw new Error("Advisor context not found — ensure your account is registered in user_faculty");
+  let departmentId, departmentName, currentYear, academicYearId;
 
-  const ctx            = ctxRows[0];
-  const departmentId   = ctx.department_id;
-  const departmentName = ctx.department_name;
-  const advisorBatch   = ctx.batch;
-  const currentYear    = ctx.current_year;
+  if (isAdmin) {
+    if (!department) throw new Error("department is required");
+    const deptRows = await callProcedure(eventPool, "sp_get_department_id_by_name", [department]);
+    if (!deptRows || deptRows.length === 0) throw new Error("Department not found");
+    departmentId = deptRows[0].department_id;
+    departmentName = deptRows[0].department_name;
 
-  if (String(advisorBatch) !== String(batch))
-    throw new Error(`Batch mismatch: your assigned batch is "${advisorBatch}", cannot create students for batch "${batch}"`);
+    const valResult = await validateBatchService(batch, course);
+    if (!valResult.valid) throw new Error(valResult.message || "Invalid batch");
+    currentYear = valResult.currentYear;
 
-  const ayRows = await callProcedure(eventPool, "sp_get_academic_year_by_batch", [batch]);
-  if (!ayRows || ayRows.length === 0)
-    throw new Error(`Academic year not found for batch="${batch}". Ensure AY${batch} exists in academic_year table.`);
-  const academicYearId = ayRows[0].academic_year_id;
+    const ayRows = await callProcedure(eventPool, "sp_get_academic_year_by_batch", [batch]);
+    if (!ayRows || ayRows.length === 0)
+      throw new Error(`Academic year not found for batch="${batch}". Ensure AY${batch} exists in academic_year table.`);
+    academicYearId = ayRows[0].academic_year_id;
+  } else {
+    // Advisor flow
+    const ctxRows = await callProcedure(eventPool, "sp_get_advisor_context", [caller.username]);
+    if (!ctxRows || ctxRows.length === 0)
+      throw new Error("Advisor context not found — ensure your account is registered in user_faculty");
+
+    const ctx            = ctxRows[0];
+    departmentId   = ctx.department_id;
+    departmentName = ctx.department_name;
+    const advisorBatch   = ctx.batch;
+    currentYear    = ctx.current_year;
+
+    if (String(advisorBatch) !== String(batch))
+      throw new Error(`Batch mismatch: your assigned batch is "${advisorBatch}", cannot create students for batch "${batch}"`);
+
+    const ayRows = await callProcedure(eventPool, "sp_get_academic_year_by_batch", [batch]);
+    if (!ayRows || ayRows.length === 0)
+      throw new Error(`Academic year not found for batch="${batch}". Ensure AY${batch} exists in academic_year table.`);
+    academicYearId = ayRows[0].academic_year_id;
+  }
 
   const saltRounds     = parseInt(process.env.BCRYPT_SALT || "10", 10);
   const insertedInAuth = [];
@@ -70,14 +165,14 @@ async function createUsersService(req, payload) {
 
     try {
       const result = await callProcedure(authPool, "sp_insert_login", [
-        username, hashedPwd, "R01", departmentId, "ACTIVE", advisor.username,
+        username, hashedPwd, "R01", departmentId, "ACTIVE", caller.username,
       ]);
       const wasInserted = result && result[0] ? Number(result[0].inserted) : 1;
       if (wasInserted) {
         insertedInAuth.push(username);
         createdUsers.push({ username, password: rawPassword });
         
-        // Set must_change_password (BUG 3)
+        // Set must_change_password
         await authPool.query(
           `UPDATE credentials.table_login SET must_change_password = true WHERE user_name = $1`,
           [username]
@@ -90,25 +185,21 @@ async function createUsersService(req, payload) {
     }
 
     try {
-      const spRows = await callProcedure(eventPool, "sp_create_student_user", [
-        advisor.username,
-        username,
-        username,
-        "",
-        "",
-        "",
-        "",
+      const outRow = await createOneStudentGeneric({
+        creatorUsername: caller.username,
+        isAdmin,
+        departmentId,
+        rollNo: username,
+        firstName: "",
+        lastName: "",
+        gender: "",
+        registrationNo: "",
         academicYearId,
         currentYear,
         course,
-        semester || null,
-        batch,
-        advisor.username,
-      ]);
-      const outRow = spRows[0];
-      if (!outRow || !outRow.p_success) {
-        throw new Error(outRow?.p_message || "sp_create_student_user failed");
-      }
+        semester: semester || null,
+        batch
+      });
       tableName = outRow.p_table_name;
     } catch (err) {
       console.error(`❌ Event insert failed for ${username}:`, err.message);
@@ -132,35 +223,10 @@ async function createUsersService(req, payload) {
 }
 
 // ── Staff-flow create student range ──────────────────────────────────────────
-async function createOneStudent(advisorUsername, advCtx, studentPayload) {
-  const { current_year: currentYear, batch } = advCtx;
-  const { rollNo, firstName, lastName, gender, registrationNo, course, semester, academicYearId } = studentPayload;
-
-  const spRows = await callProcedure(eventPool, "sp_create_student_user", [
-    advisorUsername,
-    rollNo,
-    rollNo.toLowerCase(),
-    firstName || "",
-    lastName || "",
-    gender || "",
-    registrationNo || "",
-    academicYearId || null,
-    currentYear,
-    course || "",
-    semester || null,
-    batch,
-    advisorUsername,
-  ]);
-  const outRow = spRows[0];
-  if (!outRow || !outRow.p_success) {
-    throw new Error(outRow?.p_message || "sp_create_student_user failed");
-  }
-  return outRow;
-}
-
 async function createStudentsRangeService(req, payload) {
-  const { username: advisorUsername } = req.user;
-  const { prefix, rangeFrom, rangeTo, course, semester } = payload;
+  const caller = req.user;
+  const isAdmin = caller.role === "ADMIN";
+  const { prefix, rangeFrom, rangeTo, course, semester, department, batch: batchInput } = payload;
 
   const start = parseInt(rangeFrom, 10);
   const end = parseInt(rangeTo, 10);
@@ -172,11 +238,41 @@ async function createStudentsRangeService(req, payload) {
     throw new Error("Range size exceeds 500 limit");
   }
 
-  const advCtx = await callProcedure(eventPool, "sp_get_advisor_context", [advisorUsername]);
-  if (!advCtx || advCtx.length === 0) {
-    throw new Error("Advisor context not found");
+  let departmentId, departmentName, currentYear, academicYearId, batch;
+
+  if (isAdmin) {
+    if (!department) throw new Error("department is required");
+    if (!batchInput) throw new Error("batch is required");
+    batch = batchInput;
+
+    const deptRows = await callProcedure(eventPool, "sp_get_department_id_by_name", [department]);
+    if (!deptRows || deptRows.length === 0) throw new Error("Department not found");
+    departmentId = deptRows[0].department_id;
+    departmentName = deptRows[0].department_name;
+
+    const valResult = await validateBatchService(batch, course);
+    if (!valResult.valid) throw new Error(valResult.message || "Invalid batch");
+    currentYear = valResult.currentYear;
+
+    const ayRows = await callProcedure(eventPool, "sp_get_academic_year_by_batch", [batch]);
+    if (!ayRows || ayRows.length === 0) throw new Error(`Academic year not found for batch "${batch}"`);
+    academicYearId = ayRows[0].academic_year_id;
+  } else {
+    // Advisor flow
+    const advCtx = await callProcedure(eventPool, "sp_get_advisor_context", [caller.username]);
+    if (!advCtx || advCtx.length === 0) {
+      throw new Error("Advisor context not found");
+    }
+    const ctx = advCtx[0];
+    departmentId = ctx.department_id;
+    departmentName = ctx.department_name;
+    batch = ctx.batch;
+    currentYear = ctx.current_year;
+
+    const ayRows = await callProcedure(eventPool, "sp_get_academic_year_by_batch", [batch]);
+    if (!ayRows || ayRows.length === 0) throw new Error(`Academic year not found for batch "${batch}"`);
+    academicYearId = ayRows[0].academic_year_id;
   }
-  const { department_id: deptId } = advCtx[0];
 
   let createdCount = 0;
   let failedCount = 0;
@@ -191,17 +287,28 @@ async function createStudentsRangeService(req, payload) {
     const username = roll_no.toLowerCase();
 
     try {
-      const outRow = await createOneStudent(advisorUsername, advCtx[0], {
-        rollNo: roll_no, course, semester,
+      const outRow = await createOneStudentGeneric({
+        creatorUsername: caller.username,
+        isAdmin,
+        departmentId,
+        rollNo: roll_no,
+        firstName: "",
+        lastName: "",
+        gender: "",
+        registrationNo: "",
+        academicYearId,
+        currentYear,
+        course,
+        semester,
+        batch
       });
 
       const rawPassword = generateRandomPassword();
       const hashed = await bcrypt.hash(rawPassword, saltRounds);
 
       try {
-        await callProcedure(authPool, "sp_insert_login", [username, hashed, "R01", deptId, "ACTIVE", advisorUsername]);
+        await callProcedure(authPool, "sp_insert_login", [username, hashed, "R01", departmentId, "ACTIVE", caller.username]);
         
-        // Set must_change_password (BUG 3)
         await authPool.query(
           `UPDATE credentials.table_login SET must_change_password = true WHERE user_name = $1`,
           [username]
@@ -224,34 +331,70 @@ async function createStudentsRangeService(req, payload) {
 
 // ── Staff-flow create student single ─────────────────────────────────────────
 async function createStudentSingleService(req, payload) {
-  const { username: advisorUsername } = req.user;
-  const { roll_no, first_name, last_name, gender, registration_no, course, semester } = payload;
+  const caller = req.user;
+  const isAdmin = caller.role === "ADMIN";
+  const { roll_no, first_name, last_name, gender, registration_no, course, semester, department, batch: batchInput } = payload;
 
-  const advCtx = await callProcedure(eventPool, "sp_get_advisor_context", [advisorUsername]);
-  if (!advCtx || advCtx.length === 0) {
-    throw new Error("Advisor context not found");
+  let departmentId, departmentName, currentYear, academicYearId, batch;
+
+  if (isAdmin) {
+    if (!department) throw new Error("department is required");
+    if (!batchInput) throw new Error("batch is required");
+    batch = batchInput;
+
+    const deptRows = await callProcedure(eventPool, "sp_get_department_id_by_name", [department]);
+    if (!deptRows || deptRows.length === 0) throw new Error("Department not found");
+    departmentId = deptRows[0].department_id;
+    departmentName = deptRows[0].department_name;
+
+    const valResult = await validateBatchService(batch, course);
+    if (!valResult.valid) throw new Error(valResult.message || "Invalid batch");
+    currentYear = valResult.currentYear;
+
+    const ayRows = await callProcedure(eventPool, "sp_get_academic_year_by_batch", [batch]);
+    if (!ayRows || ayRows.length === 0) throw new Error(`Academic year not found for batch "${batch}"`);
+    academicYearId = ayRows[0].academic_year_id;
+  } else {
+    // Advisor flow
+    const advCtx = await callProcedure(eventPool, "sp_get_advisor_context", [caller.username]);
+    if (!advCtx || advCtx.length === 0) {
+      throw new Error("Advisor context not found");
+    }
+    const ctx = advCtx[0];
+    departmentId = ctx.department_id;
+    departmentName = ctx.department_name;
+    batch = ctx.batch;
+    currentYear = ctx.current_year;
+
+    const ayRows = await callProcedure(eventPool, "sp_get_academic_year_by_batch", [batch]);
+    if (!ayRows || ayRows.length === 0) throw new Error(`Academic year not found for batch "${batch}"`);
+    academicYearId = ayRows[0].academic_year_id;
   }
-  const { department_id: deptId } = advCtx[0];
 
   const username = String(roll_no).trim().toLowerCase();
   const rawPassword = generateRandomPassword();
   const saltRounds = parseInt(process.env.BCRYPT_SALT || "10", 10);
   const hashed = await bcrypt.hash(rawPassword, saltRounds);
 
-  const outRow = await createOneStudent(advisorUsername, advCtx[0], {
+  const outRow = await createOneStudentGeneric({
+    creatorUsername: caller.username,
+    isAdmin,
+    departmentId,
     rollNo: String(roll_no).trim(),
     firstName: first_name ? String(first_name).trim() : "",
     lastName: last_name ? String(last_name).trim() : "",
     gender: gender ? String(gender).trim() : "",
     registrationNo: registration_no ? String(registration_no).trim() : "",
+    academicYearId,
+    currentYear,
     course: course ? String(course).trim() : "",
     semester: semester ? parseInt(semester, 10) : 1,
+    batch
   });
 
   try {
-    await callProcedure(authPool, "sp_insert_login", [username, hashed, "R01", deptId, "ACTIVE", advisorUsername]);
+    await callProcedure(authPool, "sp_insert_login", [username, hashed, "R01", departmentId, "ACTIVE", caller.username]);
 
-    // Set must_change_password (BUG 3)
     await authPool.query(
       `UPDATE credentials.table_login SET must_change_password = true WHERE user_name = $1`,
       [username]
@@ -266,13 +409,47 @@ async function createStudentSingleService(req, payload) {
 
 // ── Staff-flow bulk create student Excel ──────────────────────────────────────
 async function createStudentsExcelService(req, rows) {
-  const { username: advisorUsername } = req.user;
+  const caller = req.user;
+  const isAdmin = caller.role === "ADMIN";
 
-  const advCtx = await callProcedure(eventPool, "sp_get_advisor_context", [advisorUsername]);
-  if (!advCtx || advCtx.length === 0) {
-    throw new Error("Advisor context not found");
+  let departmentId, departmentName, currentYear, academicYearId, batch, derived_semester;
+
+  if (isAdmin) {
+    const { department, batch: batchInput, course, semester } = req.body;
+    if (!department) throw new Error("department is required");
+    if (!batchInput) throw new Error("batch is required");
+    batch = batchInput;
+    derived_semester = semester ? parseInt(semester, 10) : 1;
+
+    const deptRows = await callProcedure(eventPool, "sp_get_department_id_by_name", [department]);
+    if (!deptRows || deptRows.length === 0) throw new Error("Department not found");
+    departmentId = deptRows[0].department_id;
+    departmentName = deptRows[0].department_name;
+
+    const valResult = await validateBatchService(batch, course || "B.E");
+    if (!valResult.valid) throw new Error(valResult.message || "Invalid batch");
+    currentYear = valResult.currentYear;
+
+    const ayRows = await callProcedure(eventPool, "sp_get_academic_year_by_batch", [batch]);
+    if (!ayRows || ayRows.length === 0) throw new Error(`Academic year not found for batch "${batch}"`);
+    academicYearId = ayRows[0].academic_year_id;
+  } else {
+    // Advisor flow
+    const advCtx = await callProcedure(eventPool, "sp_get_advisor_context", [caller.username]);
+    if (!advCtx || advCtx.length === 0) {
+      throw new Error("Advisor context not found");
+    }
+    const ctx = advCtx[0];
+    departmentId = ctx.department_id;
+    departmentName = ctx.department_name;
+    batch = ctx.batch;
+    currentYear = ctx.current_year;
+    derived_semester = ctx.derived_semester;
+
+    const ayRows = await callProcedure(eventPool, "sp_get_academic_year_by_batch", [batch]);
+    if (!ayRows || ayRows.length === 0) throw new Error(`Academic year not found for batch "${batch}"`);
+    academicYearId = ayRows[0].academic_year_id;
   }
-  const { department_id: deptId, derived_semester } = advCtx[0];
 
   let createdCount = 0;
   let failedCount = 0;
@@ -296,23 +473,29 @@ async function createStudentsExcelService(req, rows) {
     const username = rollNoStr.toLowerCase();
 
     try {
-      const outRow = await createOneStudent(advisorUsername, advCtx[0], {
+      const activeCourse = course ? String(course).trim() : (req.body.course || "B.E");
+      const outRow = await createOneStudentGeneric({
+        creatorUsername: caller.username,
+        isAdmin,
+        departmentId,
         rollNo: rollNoStr,
         firstName: first_name ? String(first_name).trim() : "",
         lastName: last_name ? String(last_name).trim() : "",
         gender: gender ? String(gender).trim() : "",
         registrationNo: registration_no ? String(registration_no).trim() : "",
-        course: course ? String(course).trim() : "",
+        academicYearId,
+        currentYear,
+        course: activeCourse,
         semester: derived_semester,
+        batch
       });
 
       const rawPassword = generateRandomPassword();
       const hashed = await bcrypt.hash(rawPassword, saltRounds);
 
       try {
-        await callProcedure(authPool, "sp_insert_login", [username, hashed, "R01", deptId, "ACTIVE", advisorUsername]);
+        await callProcedure(authPool, "sp_insert_login", [username, hashed, "R01", departmentId, "ACTIVE", caller.username]);
 
-        // Set must_change_password (BUG 3)
         await authPool.query(
           `UPDATE credentials.table_login SET must_change_password = true WHERE user_name = $1`,
           [username]
@@ -564,3 +747,85 @@ exports.promoteBatch = async (req, res) => {
     return res.status(500).json({ success: false, message: err.message });
   }
 };
+
+exports.updateStudentStatus = async (req, res) => {
+  try {
+    const caller = req.user;
+    const { roll_no } = req.params;
+    const { status } = req.body;
+
+    if (!roll_no || !status) {
+      return res.status(400).json({ success: false, message: "Roll number and status are required" });
+    }
+
+    const targetStatus = String(status).toUpperCase();
+    if (targetStatus !== "ACTIVE" && targetStatus !== "INACTIVE") {
+      return res.status(400).json({ success: false, message: "Invalid status value. Must be ACTIVE or INACTIVE" });
+    }
+
+    const { rows } = await authPool.query(
+      "SELECT user_name, department_id FROM credentials.table_login WHERE user_name = $1 AND user_role_id = 'R01'",
+      [String(roll_no).toLowerCase()]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: "Student credentials not found" });
+    }
+
+    const departmentId = rows[0].department_id;
+    let tableName;
+
+    if (caller.role === "ADVISOR") {
+      const advCtxRows = await callProcedure(eventPool, "sp_get_advisor_context", [caller.username]);
+      const advCtx = advCtxRows[0];
+      if (!advCtx || advCtx.department_id !== departmentId) {
+        return res.status(403).json({ success: false, message: "Unauthorized: student is in a different department" });
+      }
+
+      tableName = `user_student_${advCtx.department_name.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+      const studentCheck = await eventPool.query(
+        `SELECT 1 FROM event_management.${tableName} WHERE roll_no = $1 AND batch = $2`,
+        [roll_no, advCtx.batch]
+      );
+      if (studentCheck.rows.length === 0) {
+        return res.status(403).json({ success: false, message: "Unauthorized: student is not in your assigned batch" });
+      }
+    } else if (caller.role === "ADMIN") {
+      const deptRows = await eventPool.query(
+        "SELECT department_name FROM event_management.department WHERE department_id = $1",
+        [departmentId]
+      );
+      if (deptRows.rows.length === 0) {
+        return res.status(500).json({ success: false, message: "Department lookup failed for student" });
+      }
+      tableName = `user_student_${deptRows.rows[0].department_name.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+    } else {
+      return res.status(403).json({ success: false, message: "Unauthorized role for status change" });
+    }
+
+    const client = await authPool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "UPDATE credentials.table_login SET status = $1, last_updated_by = $2 WHERE user_name = $3",
+        [targetStatus, caller.username, String(roll_no).toLowerCase()]
+      );
+      await client.query(
+        `UPDATE event_management.${tableName} SET status = $1, last_updated_by = $2 WHERE roll_no = $3`,
+        [targetStatus, caller.username, roll_no]
+      );
+      await client.query("COMMIT");
+    } catch (txErr) {
+      await client.query("ROLLBACK");
+      throw txErr;
+    } finally {
+      client.release();
+    }
+
+    return res.json({ success: true, message: `Student status successfully updated to ${targetStatus}` });
+  } catch (err) {
+    console.error("❌ updateStudentStatus error:", err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+

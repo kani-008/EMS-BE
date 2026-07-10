@@ -461,3 +461,44 @@ exports.getAdvisorContext = async (req, res) => {
     return res.status(500).json({ success: false, message: err.message });
   }
 };
+
+exports.updateStaffStatus = async (req, res) => {
+  try {
+    const caller = req.user;
+    const { facultyId } = req.params;
+    const { status } = req.body;
+
+    if (caller.role !== "ADMIN") {
+      return res.status(403).json({ success: false, message: "Unauthorized: only administrators can change staff status" });
+    }
+
+    if (!facultyId || !status) {
+      return res.status(400).json({ success: false, message: "Faculty ID and status are required" });
+    }
+
+    const targetStatus = String(status).toUpperCase();
+    if (targetStatus !== "ACTIVE" && targetStatus !== "INACTIVE") {
+      return res.status(400).json({ success: false, message: "Invalid status value. Must be ACTIVE or INACTIVE" });
+    }
+
+    const facultyRows = await eventPool.query(
+      "SELECT user_name FROM event_management.user_faculty WHERE faculty_id = $1 LIMIT 1",
+      [facultyId]
+    );
+    if (facultyRows.rows.length === 0) {
+      return res.status(404).json({ success: false, message: "Staff member not found" });
+    }
+    const staffUsername = facultyRows.rows[0].user_name;
+
+    await authPool.query(
+      "UPDATE credentials.table_login SET status = $1, last_updated_by = $2 WHERE user_name = $3",
+      [targetStatus, caller.username, staffUsername]
+    );
+
+    return res.json({ success: true, message: `Staff status successfully updated to ${targetStatus}` });
+  } catch (err) {
+    console.error("❌ updateStaffStatus error:", err.message);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+

@@ -18,6 +18,8 @@ async function run() {
   try {
     await applySQL(path.resolve(__dirname, 'functions/credentials/f_login_user.sql'));
     await applySQL(path.resolve(__dirname, 'functions/event_management/f_bulk_create_staff.sql'));
+    await applySQL(path.resolve(__dirname, 'functions/event_management/f_create_student_admin.sql'));
+    await applySQL(path.resolve(__dirname, 'functions/event_management/f_get_all_users.sql'));
     console.log('✅ SQL files loaded successfully.');
   } catch (err) {
     console.error('❌ Failed to load SQL:', err.message);

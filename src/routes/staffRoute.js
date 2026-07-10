@@ -49,4 +49,11 @@ router.get(
   staffController.getAdvisorContext
 );
 
+router.patch(
+  "/:facultyId/status",
+  verifyToken,
+  allowRoles("ADMIN"),
+  staffController.updateStaffStatus
+);
+
 module.exports = router;
