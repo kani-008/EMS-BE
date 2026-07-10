@@ -29,7 +29,7 @@ exports.createStudents = async (req, res) => {
 
 exports.getAdvisorStudents = async (req, res) => {
   try {
-    const result = await getAdvisorStudentsService(req.user.username);
+    const result = await getAdvisorStudentsService(req.user.username, req.query);
     return res.json(result);
   } catch (err) {
     console.error("❌ getAdvisorStudents error:", err.message);

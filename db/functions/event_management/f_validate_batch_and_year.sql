@@ -11,18 +11,28 @@ CREATE OR REPLACE FUNCTION event_management.sp_validate_batch_and_year(
   p_current_calendar_year INT,
   OUT p_is_valid BOOLEAN,
   OUT p_current_year INT,
+  OUT p_semester INT,
   OUT p_message VARCHAR
 ) AS $$
 DECLARE
   v_course_duration INT;
   v_derived_year    INT;
+  v_years_completed INT;
 BEGIN
   v_course_duration := CASE WHEN UPPER(TRIM(p_course)) = 'M.E' THEN 2 ELSE 4 END;
   v_derived_year := p_current_calendar_year - p_batch + 1;
 
+  v_years_completed := p_current_calendar_year - p_batch;
+  IF EXTRACT(MONTH FROM CURRENT_DATE)::INT >= 7 THEN
+    p_semester := (v_years_completed * 2) + 1;
+  ELSE
+    p_semester := v_years_completed * 2;
+  END IF;
+
   IF v_derived_year < 1 THEN
     p_is_valid := FALSE;
     p_current_year := 0;
+    p_semester := 0;
     p_message := format(
       'Batch %s is in the future — students have not joined yet. The earliest valid batch for the current year (%s) is %s.',
       p_batch, p_current_calendar_year, p_current_calendar_year
@@ -30,6 +40,7 @@ BEGIN
   ELSIF v_derived_year > v_course_duration THEN
     p_is_valid := FALSE;
     p_current_year := 0;
+    p_semester := 0;
     p_message := format(
       'Batch %s would be in Year %s but %s has a maximum duration of %s years. Students from this batch have already graduated.',
       p_batch, v_derived_year, p_course, v_course_duration
@@ -42,3 +53,4 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql
 SET search_path = credentials, event_management, public;
+

@@ -10,4 +10,18 @@ router.get(
   userController.getUsers
 );
 
+router.patch(
+  "/status",
+  verifyToken,
+  allowRoles("ADVISOR", "ADMIN"),
+  userController.updateBulkStatus
+);
+
+router.get(
+  "/filter-options",
+  verifyToken,
+  allowRoles("ADVISOR", "ADMIN"),
+  userController.getFilterOptions
+);
+
 module.exports = router;

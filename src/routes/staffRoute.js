@@ -16,7 +16,7 @@ const upload = multer({
 router.get(
   "/validate-batch",
   verifyToken,
-  allowRoles("ADMIN"),
+  allowRoles("ADMIN", "ADVISOR"),
   staffController.validateBatch
 );
 

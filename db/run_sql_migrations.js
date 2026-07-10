@@ -43,6 +43,7 @@ const EVENT_MGMT_FILES = [
   "f_get_advisor_context.sql",
   "f_get_advisor_students.sql",
   "f_get_all_users.sql",
+  "f_get_filter_options.sql",
   "f_get_user_by_username.sql",
   "f_get_staff_profile.sql",
   "f_update_staff_profile.sql",

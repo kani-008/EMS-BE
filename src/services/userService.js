@@ -3,14 +3,57 @@
 // No req/res handling. Returns data or throws.
 
 const { authPool, eventPool, callProcedure } = require("../config/db");
+const { updateStudentStatusService } = require("./studentService");
+const { updateStaffStatusService } = require("./staffService");
 
-async function getUsersService(callerUser) {
-  const eventUsers = await callProcedure(eventPool, "sp_get_all_users", []);
+async function getUsersService(callerUser, filters = {}) {
+  // Normalize filters to arrays or null
+  let roles = null;
+  if (filters.role && filters.role.length > 0) {
+    roles = [];
+    const roleArr = Array.isArray(filters.role) ? filters.role : [filters.role];
+    roleArr.forEach((r) => {
+      if (r.toUpperCase() === "STUDENT") {
+        roles.push("STUDENT");
+      } else if (r.toUpperCase() === "STAFF") {
+        roles.push("ADVISOR", "HOD", "PRINCIPAL", "FACULTY", "PLACEMENT", "SPORTS");
+      }
+    });
+  }
+
+  const courses = filters.course && filters.course.length > 0
+    ? (Array.isArray(filters.course) ? filters.course : [filters.course])
+    : null;
+
+  const years = filters.year && filters.year.length > 0
+    ? (Array.isArray(filters.year) ? filters.year : [filters.year]).map(y => parseInt(y, 10))
+    : null;
+
+  const semesters = filters.semester && filters.semester.length > 0
+    ? (Array.isArray(filters.semester) ? filters.semester : [filters.semester]).map(s => parseInt(s, 10))
+    : null;
+
+  const batches = filters.batch && filters.batch.length > 0
+    ? (Array.isArray(filters.batch) ? filters.batch : [filters.batch]).map(String)
+    : null;
+
+  const statuses = filters.status && filters.status.length > 0
+    ? (Array.isArray(filters.status) ? filters.status : [filters.status]).map(s => s.toUpperCase())
+    : null;
+
+  const eventUsers = await callProcedure(eventPool, "sp_get_all_users", [
+    roles,
+    courses,
+    years,
+    semesters,
+    batches,
+    statuses
+  ]);
+
   if (!eventUsers || eventUsers.length === 0)
-    return { success: true, data: [], total: 0 };
+    return { success: true, data: [], total: 0, active: 0, inactive: 0 };
 
   const credRows = await callProcedure(authPool, "sp_get_all_credentials", []);
-
   const credMap = {};
   (credRows || []).forEach((c) => {
     credMap[c.user_name] = {
@@ -21,6 +64,7 @@ async function getUsersService(callerUser) {
 
   let finalData = eventUsers.map((u) => {
     const cred = credMap[u.user_name] || {};
+    const finalStatus = String(u.status || cred.status || "INACTIVE").toUpperCase();
     return {
       userId:          u.roll_no || u.faculty_id,
       fullName:        u.full_name
@@ -37,8 +81,8 @@ async function getUsersService(callerUser) {
       semester:        u.semester        || null,
       registrationNo:  u.registration_no || null,
       registration_no: u.registration_no || null,
-      status:          String(cred.status || "INACTIVE").toUpperCase(),
-      userRole:        cred.userRole || u.base_role || "Unknown",
+      status:          finalStatus,
+      userRole:        cred.userRole || u.base_role || u.user_role || "Unknown",
       createdAt:       u.created_on      || null,
       timestamp:       u.created_on      || null,
       createdBy:       u.last_updated_by || null,
@@ -70,7 +114,47 @@ async function getUsersService(callerUser) {
     return db - da;
   });
 
-  return { success: true, data: finalData, total: finalData.length };
+  const activeCount = finalData.filter(u => u.status === 'ACTIVE').length;
+  const inactiveCount = finalData.filter(u => u.status === 'INACTIVE' || u.status === 'UNVERIFIED').length;
+
+  return {
+    success: true,
+    data: finalData,
+    total: finalData.length,
+    active: activeCount,
+    inactive: inactiveCount
+  };
 }
 
-module.exports = { getUsersService };
+async function updateBulkStatusService(callerUser, userIds, status) {
+  const targetStatus = String(status).toUpperCase();
+  if (targetStatus !== "ACTIVE" && targetStatus !== "INACTIVE") {
+    throw new Error("Invalid status. Must be ACTIVE or INACTIVE");
+  }
+
+  const results = [];
+  for (const id of userIds) {
+    const { rows } = await authPool.query(
+      "SELECT user_role_id FROM credentials.table_login WHERE user_name = $1",
+      [String(id).toLowerCase()]
+    );
+    if (rows.length === 0) {
+      results.push({ id, success: false, message: "User not found" });
+      continue;
+    }
+    const isStudent = rows[0].user_role_id === "R01";
+    try {
+      if (isStudent) {
+        await updateStudentStatusService(callerUser, id, targetStatus);
+      } else {
+        await updateStaffStatusService(callerUser, id, targetStatus);
+      }
+      results.push({ id, success: true });
+    } catch (err) {
+      results.push({ id, success: false, message: err.message });
+    }
+  }
+  return { success: true, results };
+}
+
+module.exports = { getUsersService, updateBulkStatusService };

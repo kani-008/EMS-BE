@@ -34,6 +34,7 @@ async function validateBatchService(batch, course) {
     success:     true,
     valid:       isValid,
     currentYear: isValid ? Number(outRow.p_current_year) : null,
+    semester:    isValid ? Number(outRow.p_semester) : null,
     message:     outRow?.p_message || "",
   };
 }
@@ -251,13 +252,20 @@ async function bulkCreateStaffService(callerUser, rows) {
       batchVal = batchRaw;
     }
 
+    let currentYearVal = 0;
+    if (roleName === "ADVISOR" && batchVal !== "N/A") {
+      const valRes = await validateBatchService(batchVal, course);
+      if (valRes.valid) {
+        currentYearVal = valRes.currentYear;
+      } else {
+        rowErrors.push(valRes.message || `Invalid batch/course combo: ${batchVal} + ${course}`);
+      }
+    }
+
     if (rowErrors.length > 0) {
       failed.push({ row: rowNum, data: row, errors: rowErrors });
       continue;
     }
-
-    const currentYearRaw = String(row.current_year ?? row.currentYear ?? "").trim();
-    const currentYearVal = /^\d+$/.test(currentYearRaw) ? parseInt(currentYearRaw, 10) : 0;
 
     let username  = null;
     let facultyId = null;

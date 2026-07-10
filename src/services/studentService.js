@@ -44,6 +44,7 @@ async function validateBatchService(batch, course) {
     success:     true,
     valid:       isValid,
     currentYear: isValid ? Number(outRow.p_current_year) : null,
+    semester:    isValid ? Number(outRow.p_semester) : null,
     message:     outRow?.p_message || "",
   };
 }
@@ -522,11 +523,33 @@ async function promoteYearForBatchService(batch, department) {
 
 // ── Get advisor's student list (GET /) ────────────────────────────────────────
 
-async function getAdvisorStudentsService(username) {
+async function getAdvisorStudentsService(username, filters = {}) {
   const advCtx  = await callProcedure(eventPool, "sp_get_advisor_context", [username]);
   const deptName = advCtx && advCtx[0] ? advCtx[0].department_name : "Unknown";
 
-  const students = await callProcedure(eventPool, "sp_get_advisor_students", [username]);
+  const courses = filters.course && filters.course.length > 0
+    ? (Array.isArray(filters.course) ? filters.course : [filters.course])
+    : null;
+
+  const years = filters.year && filters.year.length > 0
+    ? (Array.isArray(filters.year) ? filters.year : [filters.year]).map(y => parseInt(y, 10))
+    : null;
+
+  const semesters = filters.semester && filters.semester.length > 0
+    ? (Array.isArray(filters.semester) ? filters.semester : [filters.semester]).map(s => parseInt(s, 10))
+    : null;
+
+  const statuses = filters.status && filters.status.length > 0
+    ? (Array.isArray(filters.status) ? filters.status : [filters.status]).map(s => s.toUpperCase())
+    : null;
+
+  const students = await callProcedure(eventPool, "sp_get_advisor_students", [
+    username,
+    courses,
+    years,
+    semesters,
+    statuses
+  ]);
 
   const formatted = (students || []).map((s) => ({
     roll_no:         s.roll_no,
@@ -546,7 +569,11 @@ async function getAdvisorStudentsService(username) {
     last_updated_by: s.last_updated_by,
   }));
 
-  return { success: true, data: formatted };
+  const total = formatted.length;
+  const active = formatted.filter(s => String(s.status).toUpperCase() === 'ACTIVE').length;
+  const inactive = formatted.filter(s => String(s.status).toUpperCase() === 'INACTIVE' || String(s.status).toUpperCase() === 'UNVERIFIED').length;
+
+  return { success: true, data: formatted, total, active, inactive };
 }
 
 // ── Student status toggle (PATCH /:roll_no/status) ────────────────────────────
