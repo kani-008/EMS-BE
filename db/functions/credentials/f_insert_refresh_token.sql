@@ -1,5 +1,5 @@
 -- Function: credentials.sp_insert_refresh_token
--- Purpose: Insert a new refresh token and revoke any prior active tokens for the user.
+-- Purpose: Insert a raw refresh token and revoke/delete any prior tokens for the user.
 -- Database: credentials
 
 CREATE OR REPLACE FUNCTION credentials.sp_insert_refresh_token(
@@ -8,10 +8,9 @@ CREATE OR REPLACE FUNCTION credentials.sp_insert_refresh_token(
   p_expires_at  TIMESTAMP
 ) RETURNS VOID AS $$
 BEGIN
-  -- Revoke prior active tokens for this user
-  UPDATE credentials.refresh_tokens
-  SET revoked_at = now()
-  WHERE user_name = p_user_name AND revoked_at IS NULL;
+  -- Revoke/delete prior active tokens for this user (single session model)
+  DELETE FROM credentials.refresh_tokens
+  WHERE user_name = p_user_name;
 
   -- Insert new token
   INSERT INTO credentials.refresh_tokens (user_name, token, expires_at)

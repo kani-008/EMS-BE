@@ -32,7 +32,8 @@ const CREDENTIALS_FILES = [
   "f_login_user.sql",             // depends on table_role + user_role via JOIN
   "f_insert_refresh_token.sql",
   "f_get_refresh_token.sql",
-  "f_revoke_refresh_token.sql",
+  "f_delete_refresh_token.sql",
+  "f_delete_all_refresh_tokens.sql",
 ];
 
 const EVENT_MGMT_FILES = [

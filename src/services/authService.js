@@ -1,11 +1,10 @@
 // src/services/authService.js
-// Business logic for authentication — login, token building, cookie config.
+// Business logic for authentication — login, token building, token verify, DB persistence.
 // No req/res handling. All functions return data or throw.
 
 const { authPool, eventPool, callProcedure } = require("../config/db");
 const bcrypt = require("bcrypt");
 const jwt    = require("jsonwebtoken");
-const crypto = require("crypto");
 
 class AuthError extends Error {
   constructor(message, statusCode = 400, code = "AUTH_ERROR") {
@@ -20,19 +19,6 @@ function isAuthDebugEnabled() {
   return String(process.env.AUTH_DEBUG || "").toLowerCase() === "true";
 }
 
-function cookieOptions(maxAge) {
-  const isProd = process.env.NODE_ENV === "production";
-  return {
-    httpOnly: true,
-    // In production (cross-origin): SameSite=None + Secure=true required.
-    // In development (localhost):   SameSite=Lax  + Secure=false is enough.
-    secure:   isProd ? true  : false,
-    sameSite: isProd ? "none" : "Lax",
-    path:     "/",
-    maxAge:   maxAge,
-  };
-}
-
 function parseExpiresInToMs(val) {
   const match = String(val || "").trim().match(/^(\d+)([mdh])$/i);
   if (!match) return 15 * 60 * 1000; // default 15m
@@ -44,8 +30,22 @@ function parseExpiresInToMs(val) {
   return 15 * 60 * 1000;
 }
 
-function hashToken(token) {
-  return crypto.createHash("sha256").update(token).digest("hex");
+function signAccessToken(payload) {
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) {
+    throw new AuthError("Server misconfigured", 500, "JWT_SECRET_MISSING");
+  }
+  const expiry = process.env.ACCESS_TOKEN_EXPIRES_IN || "15m";
+  return jwt.sign(payload, jwtSecret, { expiresIn: expiry });
+}
+
+function signRefreshToken(payload) {
+  const refreshSecret = process.env.REFRESH_TOKEN_SECRET;
+  if (!refreshSecret) {
+    throw new AuthError("Server misconfigured", 500, "REFRESH_TOKEN_SECRET_MISSING");
+  }
+  const expiry = process.env.REFRESH_TOKEN_EXPIRES_IN || "30d";
+  return jwt.sign(payload, refreshSecret, { expiresIn: expiry });
 }
 
 async function loginService(username, password) {
@@ -79,11 +79,6 @@ async function loginService(username, password) {
 
   const roleName = user.role_name || "UNKNOWN";
 
-  const jwtSecret = process.env.JWT_SECRET;
-  if (!jwtSecret) {
-    throw new AuthError("Server misconfigured", 500, "JWT_SECRET_MISSING");
-  }
-
   const payload = {
     username:             user.user_name,
     roleId:               user.user_role_id,
@@ -99,31 +94,17 @@ async function loginService(username, password) {
     console.log("🔎 JWT payload:", payload);
   }
 
-  const accessTokenExpiry = process.env.ACCESS_TOKEN_EXPIRES_IN || "15m";
+  const accessToken = signAccessToken(payload);
+  const refreshToken = signRefreshToken({ username: payload.username });
+
   const refreshTokenExpiry = process.env.REFRESH_TOKEN_EXPIRES_IN || "30d";
-
-  const accessToken = jwt.sign(payload, jwtSecret, { expiresIn: accessTokenExpiry });
-
-  const refreshTokenSecret = process.env.REFRESH_TOKEN_SECRET;
-  if (!refreshTokenSecret) {
-    throw new AuthError("Server misconfigured", 500, "REFRESH_TOKEN_SECRET_MISSING");
-  }
-
-  const refreshToken = jwt.sign(
-    { username: payload.username },
-    refreshTokenSecret,
-    { expiresIn: refreshTokenExpiry }
-  );
-
   const expiresAtMs = Date.now() + parseExpiresInToMs(refreshTokenExpiry);
   const expiresAt = new Date(expiresAtMs);
 
-  const hashedToken = hashToken(refreshToken);
-
-  // Store hashed refresh token in DB
+  // Store refresh token raw (nokk-be style)
   await callProcedure(authPool, "sp_insert_refresh_token", [
     payload.username,
-    hashedToken,
+    refreshToken,
     expiresAt,
   ]);
 
@@ -131,8 +112,6 @@ async function loginService(username, password) {
     success: true,
     accessToken,
     refreshToken,
-    accessTokenMaxAge: parseExpiresInToMs(accessTokenExpiry),
-    refreshTokenMaxAge: parseExpiresInToMs(refreshTokenExpiry),
     user: {
       username:             payload.username,
       role:                 payload.role,
@@ -149,26 +128,28 @@ async function refreshService(refreshToken) {
     throw new AuthError("Refresh token is required", 401, "REFRESH_TOKEN_REQUIRED");
   }
 
-  const refreshTokenSecret = process.env.REFRESH_TOKEN_SECRET;
-  if (!refreshTokenSecret) {
+  const refreshSecret = process.env.REFRESH_TOKEN_SECRET;
+  if (!refreshSecret) {
     throw new AuthError("Server misconfigured", 500, "REFRESH_TOKEN_SECRET_MISSING");
   }
 
+  // 1. Verify JWT signature/expiry
   let decoded;
   try {
-    decoded = jwt.verify(refreshToken, refreshTokenSecret);
+    decoded = jwt.verify(refreshToken, refreshSecret);
   } catch (err) {
     throw new AuthError("Invalid or expired refresh token", 401, "REFRESH_TOKEN_INVALID");
   }
 
-  const hashedToken = hashToken(refreshToken);
-  const rows = await callProcedure(authPool, "sp_get_refresh_token", [hashedToken]);
+  // 2. Lookup token in DB (must exist and expires_at > NOW())
+  const rows = await callProcedure(authPool, "sp_get_refresh_token", [refreshToken]);
   if (!rows || rows.length === 0) {
     throw new AuthError("Refresh token is invalid or has been revoked", 401, "REFRESH_TOKEN_REVOKED");
   }
 
   const dbRow = rows[0];
 
+  // 3. Fetch user and verify active status (EMS live account active check)
   const loginRows = await callProcedure(authPool, "sp_login_user", [dbRow.user_name]);
   if (!loginRows || loginRows.length === 0) {
     throw new AuthError("User not found", 401, "USER_NOT_FOUND");
@@ -180,10 +161,6 @@ async function refreshService(refreshToken) {
   }
 
   const roleName = user.role_name || "UNKNOWN";
-  const jwtSecret = process.env.JWT_SECRET;
-  if (!jwtSecret) {
-    throw new AuthError("Server misconfigured", 500, "JWT_SECRET_MISSING");
-  }
 
   const payload = {
     username:             user.user_name,
@@ -195,13 +172,12 @@ async function refreshService(refreshToken) {
     must_change_password: user.must_change_password ?? false,
   };
 
-  const accessTokenExpiry = process.env.ACCESS_TOKEN_EXPIRES_IN || "15m";
-  const accessToken = jwt.sign(payload, jwtSecret, { expiresIn: accessTokenExpiry });
+  // 4. Generate new access token only (nokk-be style: do not rotate refresh token)
+  const accessToken = signAccessToken(payload);
 
   return {
     success: true,
     accessToken,
-    accessTokenMaxAge: parseExpiresInToMs(accessTokenExpiry),
     user: {
       username:             payload.username,
       role:                 payload.role,
@@ -213,10 +189,11 @@ async function refreshService(refreshToken) {
   };
 }
 
-async function logoutService(refreshToken) {
+async function logoutService(refreshToken, username) {
   if (refreshToken) {
-    const hashed = hashToken(refreshToken);
-    await callProcedure(authPool, "sp_revoke_refresh_token", [hashed]);
+    await callProcedure(authPool, "sp_delete_refresh_token", [refreshToken]);
+  } else if (username) {
+    await callProcedure(authPool, "sp_delete_all_refresh_tokens", [username]);
   }
 }
 
@@ -268,7 +245,8 @@ async function getMeService(username, role, roleId, department_id) {
 module.exports = {
   AuthError,
   isAuthDebugEnabled,
-  cookieOptions,
+  signAccessToken,
+  signRefreshToken,
   loginService,
   refreshService,
   logoutService,

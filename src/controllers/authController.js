@@ -3,7 +3,6 @@
 // All business logic lives in src/services/authService.js.
 
 const {
-  cookieOptions,
   loginService,
   refreshService,
   logoutService,
@@ -28,10 +27,6 @@ exports.login = async (req, res) => {
 
     const result = await loginService(username, password);
 
-    // Set cookies: access token (short-lived) + refresh token (long-lived)
-    res.cookie("token", result.accessToken, cookieOptions(result.accessTokenMaxAge));
-    res.cookie("refresh_token", result.refreshToken, cookieOptions(result.refreshTokenMaxAge));
-
     console.log({
       route:   "POST /api/auth/login",
       username: result.user?.username || null,
@@ -40,10 +35,12 @@ exports.login = async (req, res) => {
       message:  "Login successful",
     });
 
+    // Send access and refresh token in JSON body (no cookies)
     return res.status(200).json({
       success: true,
       message: "Login successful",
-      token:   result.accessToken,
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
       user:    result.user,
     });
   } catch (err) {
@@ -67,21 +64,20 @@ exports.login = async (req, res) => {
 };
 
 exports.logout = async (req, res) => {
-  const refreshToken = req.cookies?.refresh_token;
+  const { refreshToken } = req.body;
   const username = req.user?.username || "unknown";
-  console.log({ route: "POST /api/auth/logout", username, status: "logging out" });
+  
+  console.log({ 
+    route: "POST /api/auth/logout", 
+    username, 
+    status: "logging out",
+    singleSession: !!refreshToken 
+  });
 
   try {
-    // Revoke refresh token in the DB
-    await logoutService(refreshToken);
+    await logoutService(refreshToken, username);
 
-    // Clear cookies immediately
-    const optsToken = cookieOptions(0);
-    const optsRefresh = cookieOptions(0);
-    res.clearCookie("token", optsToken);
-    res.clearCookie("refresh_token", optsRefresh);
-
-    console.log(`[logout] User ${username} successfully logged out at ${new Date().toISOString()}`);
+    console.log(`[logout] User ${username} successfully logged out at ${new Date().toISOString()} (all sessions: ${!refreshToken})`);
 
     return res.status(200).json({ success: true, message: "Logout successful" });
   } catch (err) {
@@ -90,16 +86,15 @@ exports.logout = async (req, res) => {
   }
 };
 
-exports.refreshToken = async (req, res) => {
-  const refreshToken = req.cookies?.refresh_token;
+exports.refreshAccessToken = async (req, res) => {
+  const { refreshToken } = req.body;
   console.log({ route: "POST /api/auth/refresh-token", status: "refreshing token" });
 
   try {
     const result = await refreshService(refreshToken);
-    res.cookie("token", result.accessToken, cookieOptions(result.accessTokenMaxAge));
     return res.status(200).json({
       success: true,
-      token: result.accessToken,
+      accessToken: result.accessToken,
       user: result.user
     });
   } catch (err) {
@@ -112,12 +107,6 @@ exports.refreshToken = async (req, res) => {
       error: message,
       code: err?.code || "REFRESH_FAILED",
     });
-
-    // Clear cookies if refresh token is invalid/revoked/expired
-    const optsToken = cookieOptions(0);
-    const optsRefresh = cookieOptions(0);
-    res.clearCookie("token", optsToken);
-    res.clearCookie("refresh_token", optsRefresh);
 
     return res.status(status).json({
       success: false,
