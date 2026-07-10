@@ -172,46 +172,44 @@ async function updateStaffProfileService(username, payload) {
 
 async function getAdminProfileService(username, role, roleId) {
   const { rows: credRows } = await authPool.query(
-    `SELECT user_name, user_role_id, department_id, status FROM credentials.table_login WHERE user_name = $1 LIMIT 1`,
+    `SELECT user_name, user_role_id, status, first_name, last_name, gender
+     FROM credentials.table_login WHERE user_name = $1 LIMIT 1`,
     [username]
   );
   const credRow = credRows[0];
-
-  const { rows: facRows } = await eventPool.query(
-    `SELECT uf.first_name, uf.last_name, uf.gender, uf.contact, uf.department_id,
-            d.department_name, uf.user_profile
-     FROM user_faculty uf
-     LEFT JOIN department d ON uf.department_id = d.department_id
-     WHERE uf.user_name = $1 LIMIT 1`,
-    [username]
-  );
-  const facRow = facRows[0];
 
   return {
     success: true,
     data: {
       username,
       role,
-      roleId:       credRow?.user_role_id || roleId,
-      status:       credRow?.status       || "ACTIVE",
-      firstName:    facRow?.first_name    || "",
-      lastName:     facRow?.last_name     || "",
-      fullName:     facRow ? `${facRow.first_name || ""} ${facRow.last_name || ""}`.trim() : username,
-      gender:       facRow?.gender        || "",
-      phone:        facRow?.contact       || "",
-      department:   facRow?.department_name || "",
-      profilePicUrl: facRow?.user_profile || null,
+      roleId:    credRow?.user_role_id || roleId,
+      status:    credRow?.status       || "ACTIVE",
+      firstName: credRow?.first_name   || "",
+      lastName:  credRow?.last_name    || "",
+      fullName:  `${credRow?.first_name || ""} ${credRow?.last_name || ""}`.trim() || username,
+      gender:    credRow?.gender       || "",
     },
   };
 }
 
 async function updateAdminProfileService(username, payload) {
-  const { phone, currentPassword, newPassword } = payload;
+  const { firstName, lastName, gender, currentPassword, newPassword } = payload;
 
-  if (phone !== undefined) {
-    await eventPool.query(
-      `UPDATE user_faculty SET contact = $1, last_updated_by = $2 WHERE user_name = $3`,
-      [String(phone).trim(), username, username]
+  if (firstName !== undefined || lastName !== undefined || gender !== undefined) {
+    await authPool.query(
+      `UPDATE credentials.table_login
+         SET first_name = COALESCE($1, first_name),
+             last_name  = COALESCE($2, last_name),
+             gender     = COALESCE($3, gender),
+             last_updated_by = $4
+       WHERE user_name = $4`,
+      [
+        firstName !== undefined ? String(firstName).trim() : null,
+        lastName  !== undefined ? String(lastName).trim()  : null,
+        gender    !== undefined ? String(gender).trim()    : null,
+        username,
+      ]
     );
   }
 

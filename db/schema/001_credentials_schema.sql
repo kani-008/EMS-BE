@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS credentials.table_login (
   user_role_id     VARCHAR(50),
   department_id    INT,
   status           VARCHAR(50) DEFAULT 'ACTIVE',
+  first_name       VARCHAR(255),                          -- ADMIN identity fields — ADMIN has no user_faculty row
+  last_name        VARCHAR(255),
+  gender           VARCHAR(50),
   last_updated_by  VARCHAR(255),
   last_updated_on  TIMESTAMP DEFAULT now()
 );

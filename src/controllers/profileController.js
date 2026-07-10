@@ -41,11 +41,11 @@ exports.updateProfile = async (req, res) => {
       const { first_name, last_name, registration_no, gender } = req.body;
       result = await updateStudentProfileService(username, { first_name, last_name, registration_no, gender });
     } else if (role === "ADMIN") {
-      const { phone, currentPassword, newPassword, confirmPassword } = req.body;
+      const { firstName, lastName, gender, currentPassword, newPassword, confirmPassword } = req.body;
       if (newPassword && newPassword !== confirmPassword) {
         return res.status(400).json({ success: false, message: "New passwords do not match" });
       }
-      result = await updateAdminProfileService(username, { phone, currentPassword, newPassword });
+      result = await updateAdminProfileService(username, { firstName, lastName, gender, currentPassword, newPassword });
     } else if (STAFF_ROLES.includes(role)) {
       const { phone, currentPassword, newPassword, confirmPassword } = req.body;
       if (newPassword && newPassword !== confirmPassword) {
