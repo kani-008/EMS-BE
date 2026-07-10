@@ -28,7 +28,7 @@ function cookieOptions() {
     secure:   isProd ? true  : false,
     sameSite: isProd ? "none" : "Lax",
     path:     "/",
-    maxAge:   24 * 60 * 60 * 1000,
+    maxAge:   30 * 24 * 60 * 60 * 1000,
   };
 }
 
@@ -83,7 +83,7 @@ async function loginService(username, password) {
     console.log("🔎 JWT payload:", payload);
   }
 
-  const token = jwt.sign(payload, jwtSecret, { expiresIn: "1d" });
+  const token = jwt.sign(payload, jwtSecret, { expiresIn: "30d" });
 
   return {
     success: true,

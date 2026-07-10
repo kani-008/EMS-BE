@@ -45,7 +45,7 @@ const verifyToken = async (req, res, next) => {
     }
 
     if (!token) {
-      return res.status(401).json({ success: false, message: "No token provided" });
+      return res.status(401).json({ success: false, code: "NO_TOKEN", message: "No token provided" });
     }
 
     const jwtSecret = process.env.JWT_SECRET;
@@ -76,8 +76,11 @@ const verifyToken = async (req, res, next) => {
 
     next();
   } catch (err) {
-    if (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError") {
-      return res.status(401).json({ success: false, message: "Invalid or expired token" });
+    if (err.name === "TokenExpiredError") {
+      return res.status(401).json({ success: false, code: "TOKEN_EXPIRED", message: "Token has expired" });
+    }
+    if (err.name === "JsonWebTokenError") {
+      return res.status(401).json({ success: false, code: "TOKEN_INVALID", message: "Invalid token" });
     }
     console.error("❌ Auth middleware error:", err.message);
     return res.status(500).json({ success: false, message: "Authentication error" });
