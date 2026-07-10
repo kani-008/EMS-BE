@@ -516,24 +516,63 @@ async function createStudentsExcelService(req, rows) {
   return { success: true, total: rows.length, created: createdCount, failed: failedCount, succeeded, errors };
 }
 
-// ── Staff-flow update student details ────────────────────────────────────────
+// ── Update student details ──────────────────────────────────────────────────
 async function updateStudentService(req, roll_no, payload) {
-  const { username: advisorUsername } = req.user;
+  const caller = req.user;
+  const isAdmin = caller.role === "ADMIN";
   const { first_name, last_name, gender, registration_no, course, newPassword } = payload;
 
-  const rows = await callProcedure(eventPool, "sp_update_student", [
-    advisorUsername,
-    roll_no,
-    first_name ? String(first_name).trim() : "",
-    last_name ? String(last_name).trim() : "",
-    gender ? String(gender).trim() : "",
-    registration_no ? String(registration_no).trim() : "",
-    course ? String(course).trim() : "",
-  ]);
-  const outRow = rows[0];
+  if (isAdmin) {
+    // Admin: look up which dept table holds this student, then update directly
+    const credRows = await authPool.query(
+      "SELECT department_id FROM credentials.table_login WHERE user_name = $1 AND user_role_id = 'R01'",
+      [String(roll_no).toLowerCase()]
+    );
+    if (credRows.rows.length === 0) throw new Error("Student not found in credentials");
 
-  if (!outRow || !outRow.p_success) {
-    throw new Error(outRow?.p_message || "sp_update_student failed");
+    const deptRows = await eventPool.query(
+      "SELECT department_name FROM event_management.department WHERE department_id = $1",
+      [credRows.rows[0].department_id]
+    );
+    if (deptRows.rows.length === 0) throw new Error("Department not found for student");
+
+    const tableName = `user_student_${deptRows.rows[0].department_name.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+
+    const tableExists = await eventPool.query(
+      "SELECT 1 FROM information_schema.tables WHERE table_schema = 'event_management' AND table_name = $1",
+      [tableName]
+    );
+    if (tableExists.rows.length === 0) throw new Error("Student table does not exist");
+
+    await eventPool.query(
+      `UPDATE event_management.${tableName}
+       SET first_name=$1, last_name=$2, gender=$3, registration_no=$4, course=$5, last_updated_by=$6
+       WHERE roll_no=$7`,
+      [
+        first_name ? String(first_name).trim() : "",
+        last_name ? String(last_name).trim() : "",
+        gender ? String(gender).trim() : "",
+        registration_no ? String(registration_no).trim() : "",
+        course ? String(course).trim() : "",
+        caller.username,
+        roll_no
+      ]
+    );
+  } else {
+    // Advisor: use stored procedure (validates batch/dept ownership)
+    const rows = await callProcedure(eventPool, "sp_update_student", [
+      caller.username,
+      roll_no,
+      first_name ? String(first_name).trim() : "",
+      last_name ? String(last_name).trim() : "",
+      gender ? String(gender).trim() : "",
+      registration_no ? String(registration_no).trim() : "",
+      course ? String(course).trim() : "",
+    ]);
+    const outRow = rows[0];
+    if (!outRow || !outRow.p_success) {
+      throw new Error(outRow?.p_message || "sp_update_student failed");
+    }
   }
 
   if (newPassword && String(newPassword).trim().length >= 6) {
@@ -542,13 +581,14 @@ async function updateStudentService(req, roll_no, payload) {
     const newHash = await bcrypt.hash(String(newPassword).trim(), saltRounds);
 
     await authPool.query(
-      `UPDATE table_login SET password = $1, last_updated_by = $2, must_change_password = false WHERE user_name = $3`,
-      [newHash, advisorUsername, studentUsername]
+      `UPDATE credentials.table_login SET password = $1, last_updated_by = $2, must_change_password = false WHERE user_name = $3`,
+      [newHash, caller.username, studentUsername]
     );
   }
 
-  return { success: true, message: outRow.p_message };
+  return { success: true, message: "Student updated successfully" };
 }
+
 
 // ── Admin-flow promote batch ────────────────────────────────────────────────
 async function promoteYearForBatchService(req, payload) {
