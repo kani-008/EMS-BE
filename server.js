@@ -15,12 +15,12 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(cookieParser());
-const authRoutes    = require("./src/routes/authroutes");
+const loginRoutes   = require("./src/routes/loginroutes");
 const studentRoutes = require("./src/routes/studentroutes");
 const staffRoutes   = require("./src/routes/staffroutes");
 const adminRoutes   = require("./src/routes/adminroutes");
 
-app.use("/api/auth",    authRoutes);
+app.use("/api/auth",    loginRoutes);
 app.use("/api/student", studentRoutes);
 app.use("/api/staff",   staffRoutes);
 app.use("/api/admin",   adminRoutes);
