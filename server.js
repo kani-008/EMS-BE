@@ -2,7 +2,7 @@
 require("dotenv").config({ path: require("path").resolve(__dirname, ".env") });
 
 const express = require("express");
-const cors    = require("cors");
+const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const { connectDB } = require("./src/config/db");
 
@@ -10,38 +10,48 @@ const app = express();
 
 // ── Middleware ─────────────────────────────────────────────────────────────────
 const defaultOrigins = [
-  "http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:5176",
-  "http://127.0.0.1:5173", "http://127.0.0.1:5174", "http://127.0.0.1:5175", "http://127.0.0.1:5176"
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:5175",
+  "http://localhost:5176",
+  "http://127.0.0.1:5173",
+  "http://127.0.0.1:5174",
+  "http://127.0.0.1:5175",
+  "http://127.0.0.1:5176",
 ];
 const allowedOrigins = process.env.CLIENT_URL
-  ? process.env.CLIENT_URL.split(",").map(url => url.trim())
+  ? process.env.CLIENT_URL.split(",").map((url) => url.trim())
   : defaultOrigins;
 
-app.use(cors({
-  origin: allowedOrigins,
-  credentials: true,
-}));
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+  }),
+);
 app.use(express.json());
 app.use(cookieParser());
 
-const authRoute       = require("./src/routes/authRoute");
+const authRoute = require("./src/routes/authRoute");
 const departmentRoute = require("./src/routes/departmentRoute");
-const roleRoute       = require("./src/routes/roleRoute");
-const staffRoute      = require("./src/routes/staffRoute");
-const studentRoute    = require("./src/routes/studentRoute");
-const userRoute       = require("./src/routes/userRoute");
-const profileRoute    = require("./src/routes/profileRoute");
+const roleRoute = require("./src/routes/roleRoute");
+const staffRoute = require("./src/routes/staffRoute");
+const studentRoute = require("./src/routes/studentRoute");
+const userRoute = require("./src/routes/userRoute");
+const profileRoute = require("./src/routes/profileRoute");
 
-app.use("/api/auth",        authRoute);
+app.use("/api/auth", authRoute);
 app.use("/api/departments", departmentRoute);
-app.use("/api/roles",       roleRoute);
-app.use("/api/staff",       staffRoute);
-app.use("/api/students",    studentRoute);
-app.use("/api/users",       userRoute);
-app.use("/api/profile",     profileRoute);
+app.use("/api/roles", roleRoute);
+app.use("/api/staff", staffRoute);
+app.use("/api/students", studentRoute);
+app.use("/api/users", userRoute);
+app.use("/api/profile", profileRoute);
 
 // ── Health check ──────────────────────────────────────────────────────────────
-app.get("/", (_req, res) => res.send("Backend is running 🚀 (Node.js + Express + PostgreSQL stack)"));
+app.get("/", (_req, res) =>
+  res.send("Backend is running 🚀 (Node.js + Express + PostgreSQL stack)"),
+);
 
 // ── Global error handler ──────────────────────────────────────────────────────
 // eslint-disable-next-line no-unused-vars
@@ -53,8 +63,23 @@ app.use((err, _req, res, _next) => {
 // ── Boot ──────────────────────────────────────────────────────────────────────
 const PORT = parseInt(process.env.PORT || "5000", 10);
 
-connectDB().then(() => {
-  app.listen(PORT, () =>
-    console.log(`🚀 Server listening on port ${PORT}`)
-  );
-});
+connectDB()
+  .then(() => {
+    const server = app.listen(PORT, () =>
+      console.log(`🚀 Server listening on port ${PORT}`)
+    );
+
+    server.on("error", (err) => {
+      if (err.code === "EADDRINUSE") {
+        console.error(`❌ Port ${PORT} is already in use.`);
+        console.error(`   Run: Stop-Process -Id (netstat -ano | findstr :${PORT} | awk '{print $5}') -Force`);
+      } else {
+        console.error("❌ Server error:", err.message);
+      }
+      process.exit(1);
+    });
+  })
+  .catch((err) => {
+    console.error("❌ Failed to start server:", err.message);
+    process.exit(1);
+  });
