@@ -1,15 +1,37 @@
-// backend/src/app.js
-require("dotenv").config({ path: require("path").resolve(__dirname, ".env") });
-
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
-const { connectDB } = require("./src/config/db");
+const os = require("os");
+
+require("dotenv").config({ path: require("path").resolve(__dirname, ".env") });
+
+const { connectDB, authPool } = require("./src/config/db");
+
+// ── Routes ──────────────────────────────────────────────────────────
+const authRoute = require("./src/routes/authRoute");
+const departmentRoute = require("./src/routes/departmentRoute");
+const roleRoute = require("./src/routes/roleRoute");
+const staffRoute = require("./src/routes/staffRoute");
+const studentRoute = require("./src/routes/studentRoute");
+const userRoute = require("./src/routes/userRoute");
+const profileRoute = require("./src/routes/profileRoute");
 
 const app = express();
+const PORT = parseInt(process.env.PORT || "5000", 10);
+const HOST = "0.0.0.0"; // bind to all interfaces (required by every PaaS — Render, Railway, etc.)
+const IS_PROD = process.env.NODE_ENV === "production";
 
-// ── Middleware ─────────────────────────────────────────────────────────────────
-const defaultOrigins = [
+// Trust the first proxy hop so req.ip / rate-limiting / secure-cookie detection
+// see the real client correctly behind the platform's load balancer. Bump via
+// TRUST_PROXY in env if you sit behind more than one proxy hop.
+app.set("trust proxy", Number(process.env.TRUST_PROXY) || 1);
+
+
+// ── CORS ────────────────────────────────────────────────────────────
+// Strip trailing slashes so "https://foo.com/" and "https://foo.com" both match.
+const normalizeOrigin = (o) => o.trim().replace(/\/+$/, "");
+
+const defaultDevOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
   "http://localhost:5175",
@@ -19,60 +41,128 @@ const defaultOrigins = [
   "http://127.0.0.1:5175",
   "http://127.0.0.1:5176",
 ];
-const allowedOrigins = process.env.CLIENT_URL
-  ? process.env.CLIENT_URL.split(",").map((url) => url.trim())
-  : defaultOrigins;
+
+const ALLOWED_ORIGINS = process.env.CLIENT_URL
+  ? process.env.CLIENT_URL.split(",").map(normalizeOrigin).filter(Boolean)
+  : IS_PROD
+    ? [] // production must set CLIENT_URL explicitly — fail closed, no silent localhost fallback
+    : defaultDevOrigins;
+
+if (IS_PROD && ALLOWED_ORIGINS.length === 0) {
+  console.warn("[cors] NODE_ENV=production but CLIENT_URL is not set — all browser origins will be blocked.");
+}
 
 app.use(
   cors({
-    origin: allowedOrigins,
-    credentials: true,
+    origin: (origin, cb) => {
+      // allow server-to-server / curl / same-origin requests (no Origin header)
+      if (!origin) return cb(null, true);
+      if (ALLOWED_ORIGINS.includes(normalizeOrigin(origin))) return cb(null, true);
+      console.warn(`[cors] blocked origin '${origin}'`);
+      cb(new Error(`CORS: origin '${origin}' not allowed`));
+    },
+    credentials: true, // required — EMS uses an HttpOnly cookie for the JWT, not an Authorization header
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    maxAge: 86400, // cache CORS preflight for a day — fewer OPTIONS round-trips in prod
   }),
 );
-app.use(express.json());
+
+// ── Body parsers with size caps ────────────────────────────────────
+// EMS forms are small JSON payloads; Excel/CSV uploads go through multer
+// separately in staffRoute/studentRoute and aren't affected by this limit.
+app.use(express.json({ limit: "100kb" }));
+app.use(express.urlencoded({ extended: true, limit: "100kb" }));
 app.use(cookieParser());
 
-const authRoute = require("./src/routes/authRoute");
-const departmentRoute = require("./src/routes/departmentRoute");
-const roleRoute = require("./src/routes/roleRoute");
-const staffRoute = require("./src/routes/staffRoute");
-const studentRoute = require("./src/routes/studentRoute");
-const userRoute = require("./src/routes/userRoute");
-const profileRoute = require("./src/routes/profileRoute");
+// ── Health check ────────────────────────────────────────────────────
+app.get("/", (_req, res) => {
+  res.json({
+    success: true,
+    message: "EMS backend is running 🚀 (Node.js + Express + PostgreSQL/Supabase)",
+    timestamp: new Date(),
+  });
+});
 
-app.use("/api/auth", authRoute);
-app.use("/api/departments", departmentRoute);
-app.use("/api/roles", roleRoute);
-app.use("/api/staff", staffRoute);
-app.use("/api/students", studentRoute);
-app.use("/api/users", userRoute);
-app.use("/api/profile", profileRoute);
+// ── API routes ──────────────────────────────────────────────────────
+app.use("/api/auth", authRoute); // login, logout, me
+app.use("/api/departments", departmentRoute); // reference data
+app.use("/api/roles", roleRoute); // reference data
+app.use("/api/staff", staffRoute); // staff CRUD + profile + advisor-context
+app.use("/api/students", studentRoute); // student CRUD (advisor self-service + admin-driven)
+app.use("/api/users", userRoute); // unified admin+advisor user listing
+app.use("/api/profile", profileRoute); // role-aware profile GET/PUT
 
-// ── Health check ──────────────────────────────────────────────────────────────
-app.get("/", (_req, res) =>
-  res.send("Backend is running 🚀 (Node.js + Express + PostgreSQL stack)"),
-);
+// ── 404 ─────────────────────────────────────────────────────────────
+app.use((_req, res) => {
+  res.status(404).json({ success: false, message: "Resource not found" });
+});
 
-// ── Global error handler ──────────────────────────────────────────────────────
+// ── Global error handler ───────────────────────────────────────────
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
   console.error("💥 Unhandled error:", err.message);
-  res.status(500).json({ message: "Internal server error" });
+  res.status(500).json({ success: false, message: "Internal server error" });
 });
 
-// ── Boot ──────────────────────────────────────────────────────────────────────
-const PORT = parseInt(process.env.PORT || "5000", 10);
+// ── helper: find this machine's LAN IPv4 (e.g. 192.168.1.5) ────────
+// Dev-only convenience — meaningless (and mildly leaky) on a cloud host.
+function getLanIp() {
+  const nets = os.networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name] || []) {
+      if (net.family === "IPv4" && !net.internal) return net.address;
+    }
+  }
+  return "localhost";
+}
 
+// ── Start ───────────────────────────────────────────────────────────
 connectDB()
   .then(() => {
-    const server = app.listen(PORT, () =>
-      console.log(`🚀 Server listening on port ${PORT}`)
-    );
+    const server = app.listen(PORT, HOST, () => {
+      console.log(`🚀 EMS backend started (${IS_PROD ? "production" : "development"})`);
+      if (IS_PROD) {
+        console.log(`Listening on port ${PORT}`);
+      } else {
+        console.log(`Local:   http://localhost:${PORT}`);
+        console.log(`Network: http://${getLanIp()}:${PORT}   (same Wi-Fi)`);
+      }
+
+      // ── Boot-time ADMIN sanity check ─────────────────────────────────────
+      // Warn (without crashing) if any ADMIN account still has
+      // must_change_password = true.  This is the exact condition that caused
+      // the "stuck on profile page" issue — catching it at startup means we
+      // don't need a user to log in and get stuck before noticing.
+      authPool
+        .query(
+          `SELECT user_name FROM credentials.table_login
+             WHERE user_role_id = 'R08' AND must_change_password = true`
+        )
+        .then(({ rows }) => {
+          if (rows.length > 0) {
+            const names = rows.map((r) => r.user_name).join(", ");
+            console.warn(
+              `⚠️  [boot] ADMIN account(s) have must_change_password = TRUE: ${names}`
+            );
+            console.warn(
+              "   These accounts will be forced to the profile page on every login."
+            );
+            console.warn(
+              "   Fix: node db/run_fix_must_change_password.js"
+            );
+          } else {
+            console.log("✅ [boot] No ADMIN accounts locked by must_change_password.");
+          }
+        })
+        .catch((err) =>
+          console.warn("⚠️  [boot] Could not run ADMIN must_change_password check:", err.message)
+        );
+    });
 
     server.on("error", (err) => {
       if (err.code === "EADDRINUSE") {
         console.error(`❌ Port ${PORT} is already in use.`);
-        console.error(`   Run: Stop-Process -Id (netstat -ano | findstr :${PORT} | awk '{print $5}') -Force`);
       } else {
         console.error("❌ Server error:", err.message);
       }
@@ -83,3 +173,5 @@ connectDB()
     console.error("❌ Failed to start server:", err.message);
     process.exit(1);
   });
+
+module.exports = app;
