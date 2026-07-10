@@ -30,6 +30,9 @@ const CREDENTIALS_FILES = [
   "f_get_all_credentials.sql",
   "f_get_credentials_role_name.sql",
   "f_login_user.sql",             // depends on table_role + user_role via JOIN
+  "f_insert_refresh_token.sql",
+  "f_get_refresh_token.sql",
+  "f_revoke_refresh_token.sql",
 ];
 
 const EVENT_MGMT_FILES = [
@@ -61,6 +64,12 @@ const EVENT_MGMT_FILES = [
 
 async function run() {
   try {
+    console.log("\n── Schema migrations ──────────────────────────────────────────");
+    const schemaFile = path.resolve(__dirname, "schema/003_refresh_tokens.sql");
+    if (fs.existsSync(schemaFile)) {
+      await applySQL(schemaFile);
+    }
+
     console.log("\n── Credentials functions ──────────────────────────────────────");
     for (const f of CREDENTIALS_FILES) {
       await applySQL(path.join(CREDENTIALS_DIR, f));

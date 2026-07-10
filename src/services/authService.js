@@ -5,6 +5,7 @@
 const { authPool, eventPool, callProcedure } = require("../config/db");
 const bcrypt = require("bcrypt");
 const jwt    = require("jsonwebtoken");
+const crypto = require("crypto");
 
 class AuthError extends Error {
   constructor(message, statusCode = 400, code = "AUTH_ERROR") {
@@ -19,7 +20,7 @@ function isAuthDebugEnabled() {
   return String(process.env.AUTH_DEBUG || "").toLowerCase() === "true";
 }
 
-function cookieOptions() {
+function cookieOptions(maxAge) {
   const isProd = process.env.NODE_ENV === "production";
   return {
     httpOnly: true,
@@ -28,8 +29,23 @@ function cookieOptions() {
     secure:   isProd ? true  : false,
     sameSite: isProd ? "none" : "Lax",
     path:     "/",
-    maxAge:   30 * 24 * 60 * 60 * 1000,
+    maxAge:   maxAge,
   };
+}
+
+function parseExpiresInToMs(val) {
+  const match = String(val || "").trim().match(/^(\d+)([mdh])$/i);
+  if (!match) return 15 * 60 * 1000; // default 15m
+  const amount = parseInt(match[1], 10);
+  const unit = match[2].toLowerCase();
+  if (unit === 'm') return amount * 60 * 1000;
+  if (unit === 'h') return amount * 60 * 60 * 1000;
+  if (unit === 'd') return amount * 24 * 60 * 60 * 1000;
+  return 15 * 60 * 1000;
+}
+
+function hashToken(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
 }
 
 async function loginService(username, password) {
@@ -83,11 +99,40 @@ async function loginService(username, password) {
     console.log("🔎 JWT payload:", payload);
   }
 
-  const token = jwt.sign(payload, jwtSecret, { expiresIn: "30d" });
+  const accessTokenExpiry = process.env.ACCESS_TOKEN_EXPIRES_IN || "15m";
+  const refreshTokenExpiry = process.env.REFRESH_TOKEN_EXPIRES_IN || "30d";
+
+  const accessToken = jwt.sign(payload, jwtSecret, { expiresIn: accessTokenExpiry });
+
+  const refreshTokenSecret = process.env.REFRESH_TOKEN_SECRET;
+  if (!refreshTokenSecret) {
+    throw new AuthError("Server misconfigured", 500, "REFRESH_TOKEN_SECRET_MISSING");
+  }
+
+  const refreshToken = jwt.sign(
+    { username: payload.username },
+    refreshTokenSecret,
+    { expiresIn: refreshTokenExpiry }
+  );
+
+  const expiresAtMs = Date.now() + parseExpiresInToMs(refreshTokenExpiry);
+  const expiresAt = new Date(expiresAtMs);
+
+  const hashedToken = hashToken(refreshToken);
+
+  // Store hashed refresh token in DB
+  await callProcedure(authPool, "sp_insert_refresh_token", [
+    payload.username,
+    hashedToken,
+    expiresAt,
+  ]);
 
   return {
     success: true,
-    token,
+    accessToken,
+    refreshToken,
+    accessTokenMaxAge: parseExpiresInToMs(accessTokenExpiry),
+    refreshTokenMaxAge: parseExpiresInToMs(refreshTokenExpiry),
     user: {
       username:             payload.username,
       role:                 payload.role,
@@ -97,6 +142,82 @@ async function loginService(username, password) {
       must_change_password: payload.must_change_password,
     },
   };
+}
+
+async function refreshService(refreshToken) {
+  if (!refreshToken) {
+    throw new AuthError("Refresh token is required", 401, "REFRESH_TOKEN_REQUIRED");
+  }
+
+  const refreshTokenSecret = process.env.REFRESH_TOKEN_SECRET;
+  if (!refreshTokenSecret) {
+    throw new AuthError("Server misconfigured", 500, "REFRESH_TOKEN_SECRET_MISSING");
+  }
+
+  let decoded;
+  try {
+    decoded = jwt.verify(refreshToken, refreshTokenSecret);
+  } catch (err) {
+    throw new AuthError("Invalid or expired refresh token", 401, "REFRESH_TOKEN_INVALID");
+  }
+
+  const hashedToken = hashToken(refreshToken);
+  const rows = await callProcedure(authPool, "sp_get_refresh_token", [hashedToken]);
+  if (!rows || rows.length === 0) {
+    throw new AuthError("Refresh token is invalid or has been revoked", 401, "REFRESH_TOKEN_REVOKED");
+  }
+
+  const dbRow = rows[0];
+
+  const loginRows = await callProcedure(authPool, "sp_login_user", [dbRow.user_name]);
+  if (!loginRows || loginRows.length === 0) {
+    throw new AuthError("User not found", 401, "USER_NOT_FOUND");
+  }
+
+  const user = loginRows[0];
+  if (String(user.status || "").toUpperCase() !== "ACTIVE") {
+    throw new AuthError("Account is inactive. Please contact admin.", 403, "INACTIVE");
+  }
+
+  const roleName = user.role_name || "UNKNOWN";
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) {
+    throw new AuthError("Server misconfigured", 500, "JWT_SECRET_MISSING");
+  }
+
+  const payload = {
+    username:             user.user_name,
+    roleId:               user.user_role_id,
+    role:                 roleName,
+    department_id:        user.department_id   ?? null,
+    departmentId:         user.department_id   ?? null,
+    status:               user.status          ?? null,
+    must_change_password: user.must_change_password ?? false,
+  };
+
+  const accessTokenExpiry = process.env.ACCESS_TOKEN_EXPIRES_IN || "15m";
+  const accessToken = jwt.sign(payload, jwtSecret, { expiresIn: accessTokenExpiry });
+
+  return {
+    success: true,
+    accessToken,
+    accessTokenMaxAge: parseExpiresInToMs(accessTokenExpiry),
+    user: {
+      username:             payload.username,
+      role:                 payload.role,
+      roleId:               payload.roleId,
+      department_id:        payload.department_id,
+      status:               payload.status,
+      must_change_password: payload.must_change_password,
+    }
+  };
+}
+
+async function logoutService(refreshToken) {
+  if (refreshToken) {
+    const hashed = hashToken(refreshToken);
+    await callProcedure(authPool, "sp_revoke_refresh_token", [hashed]);
+  }
 }
 
 async function getMeService(username, role, roleId, department_id) {
@@ -144,4 +265,12 @@ async function getMeService(username, role, roleId, department_id) {
   };
 }
 
-module.exports = { AuthError, isAuthDebugEnabled, cookieOptions, loginService, getMeService };
+module.exports = {
+  AuthError,
+  isAuthDebugEnabled,
+  cookieOptions,
+  loginService,
+  refreshService,
+  logoutService,
+  getMeService
+};
