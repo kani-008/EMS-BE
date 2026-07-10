@@ -1,4 +1,3 @@
-// backend/src/controllers/logincontroller.js
 const { authPool, eventPool, callProcedure } = require("../config/db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
@@ -20,14 +19,16 @@ function cookieOptions() {
   const isProd = process.env.NODE_ENV === "production";
   return {
     httpOnly: true,
-    secure: isProd,
-    sameSite: isProd ? "Strict" : "Lax",
+    // Fix SameSite / Secure settings for cross-origin authentication
+    // In production, when frontend and backend run on different domains, SameSite must be "none" and Secure must be true.
+    // In development/non-production, sameSite: "Lax" and secure: false/isProd is sufficient for localhost.
+    secure: isProd ? true : false,
+    sameSite: isProd ? "none" : "Lax",
     path: "/",
     maxAge: 24 * 60 * 60 * 1000,
   };
 }
 
-// Internal auth logic from auth.service.js
 async function loginService(username, password) {
   const cleanUsername = String(username || "").trim();
   const cleanPassword = String(password || "");
@@ -69,8 +70,9 @@ async function loginService(username, password) {
     roleId: user.user_role_id,
     role: roleName,
     department_id: user.department_id ?? null,
-    departmentId: user.department_id ?? null, // backward compatibility for older consumers
+    departmentId: user.department_id ?? null,
     status: user.status ?? null,
+    must_change_password: user.must_change_password ?? false,
   };
 
   if (isAuthDebugEnabled()) {
@@ -89,11 +91,11 @@ async function loginService(username, password) {
       roleId: payload.roleId,
       department_id: payload.department_id,
       status: payload.status,
+      must_change_password: payload.must_change_password,
     },
   };
 }
 
-// ── POST /api/auth/login ────────────────────────────────────────────────────
 exports.login = async (req, res) => {
   const { username, password } = req.body;
   
@@ -153,7 +155,6 @@ exports.login = async (req, res) => {
   }
 };
 
-// ── POST /api/auth/logout ───────────────────────────────────────────────────
 exports.logout = async (req, res) => {
   console.log({
     route: "POST /api/auth/logout",
@@ -185,7 +186,6 @@ exports.logout = async (req, res) => {
   }
 };
 
-// ── GET /api/auth/me ────────────────────────────────────────────────────────
 exports.getMe = async (req, res) => {
   const userPayload = req.user || {};
   console.log({
@@ -195,7 +195,7 @@ exports.getMe = async (req, res) => {
   });
 
   try {
-    const { username, role, roleId, department_id, status } = req.user;
+    const { username, role, roleId, department_id, status, must_change_password } = req.user;
 
     let departmentName = null;
     let advisorFields = {};
@@ -253,6 +253,7 @@ exports.getMe = async (req, res) => {
         department_id: department_id ?? null,
         departmentName,
         status: status || null,
+        must_change_password: must_change_password || false,
         ...advisorFields,
       },
     });

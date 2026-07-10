@@ -66,6 +66,7 @@ const verifyToken = async (req, res, next) => {
       roleId: decoded.roleId,
       department_id: decoded.department_id || decoded.departmentId || null,
       status: decoded.status || null,
+      must_change_password: decoded.must_change_password || false,
     };
 
     if (isAuthDebugEnabled()) {

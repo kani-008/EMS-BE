@@ -9,21 +9,36 @@ const { connectDB } = require("./src/config/db");
 const app = express();
 
 // ── Middleware ─────────────────────────────────────────────────────────────────
+const defaultOrigins = [
+  "http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:5176",
+  "http://127.0.0.1:5173", "http://127.0.0.1:5174", "http://127.0.0.1:5175", "http://127.0.0.1:5176"
+];
+const allowedOrigins = process.env.CLIENT_URL
+  ? process.env.CLIENT_URL.split(",").map(url => url.trim())
+  : defaultOrigins;
+
 app.use(cors({
-  origin: ["http://localhost:5175", "http://localhost:5176", "http://localhost:5173", "http://localhost:5174"],
+  origin: allowedOrigins,
   credentials: true,
 }));
 app.use(express.json());
 app.use(cookieParser());
-const loginRoutes   = require("./src/routes/loginroutes");
-const studentRoutes = require("./src/routes/studentroutes");
-const staffRoutes   = require("./src/routes/staffroutes");
-const adminRoutes   = require("./src/routes/adminroutes");
 
-app.use("/api/auth",    loginRoutes);
-app.use("/api/student", studentRoutes);
-app.use("/api/staff",   staffRoutes);
-app.use("/api/admin",   adminRoutes);
+const authRoute       = require("./src/routes/authRoute");
+const departmentRoute = require("./src/routes/departmentRoute");
+const roleRoute       = require("./src/routes/roleRoute");
+const staffRoute      = require("./src/routes/staffRoute");
+const studentRoute    = require("./src/routes/studentRoute");
+const userRoute       = require("./src/routes/userRoute");
+const profileRoute    = require("./src/routes/profileRoute");
+
+app.use("/api/auth",        authRoute);
+app.use("/api/departments", departmentRoute);
+app.use("/api/roles",       roleRoute);
+app.use("/api/staff",       staffRoute);
+app.use("/api/students",    studentRoute);
+app.use("/api/users",       userRoute);
+app.use("/api/profile",     profileRoute);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/", (_req, res) => res.send("Backend is running 🚀 (Node.js + Express + PostgreSQL stack)"));

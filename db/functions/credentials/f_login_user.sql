@@ -13,18 +13,20 @@ DROP FUNCTION IF EXISTS credentials.sp_login_user(VARCHAR);
 
 CREATE OR REPLACE FUNCTION credentials.sp_login_user(p_user_name VARCHAR)
 RETURNS TABLE(
-  user_name       VARCHAR,
-  password        VARCHAR,
-  user_role_id    VARCHAR,
-  department_id   INT,
-  status          VARCHAR,
-  role_name       VARCHAR
+  user_name            VARCHAR,
+  password             VARCHAR,
+  user_role_id         VARCHAR,
+  department_id        INT,
+  status               VARCHAR,
+  role_name            VARCHAR,
+  must_change_password BOOLEAN
 ) AS $$
 BEGIN
   RETURN QUERY
   SELECT
     tl.user_name, tl.password, tl.user_role_id, tl.department_id, tl.status,
-    COALESCE(ur.user_role, tr.role_name, 'UNKNOWN') AS role_name
+    COALESCE(ur.user_role, tr.role_name, 'UNKNOWN') AS role_name,
+    tl.must_change_password
   FROM credentials.table_login tl
   LEFT JOIN event_management.user_role ur ON tl.user_role_id = ur.user_role_id
   LEFT JOIN credentials.table_role tr     ON tl.user_role_id = tr.role_id

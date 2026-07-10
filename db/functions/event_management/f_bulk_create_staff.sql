@@ -82,7 +82,7 @@ BEGIN
     department_id, user_role_id, batch, course, current_year, last_updated_by
   ) VALUES (
     v_fac_id, v_gen_uname, p_first_name, COALESCE(p_last_name, ''), COALESCE(p_gender, ''),
-    COALESCE(p_department_id, 0), p_role_id, v_batch, v_course, v_current_year, p_created_by
+    p_department_id, p_role_id, v_batch, v_course, v_current_year, p_created_by
   );
 
   p_success := TRUE;
