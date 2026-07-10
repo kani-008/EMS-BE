@@ -10,6 +10,7 @@ const {
   bulkCreateStaffService,
   getAdvisorContextService,
   updateStaffStatusService,
+  listStaffService,
 } = require("../services/staffService");
 
 exports.validateBatch = async (req, res) => {
@@ -123,5 +124,15 @@ exports.updateStaffStatus = async (req, res) => {
   } catch (err) {
     console.error("❌ updateStaffStatus error:", err.message);
     return res.status(err.statusCode || 500).json({ success: false, message: err.message });
+  }
+};
+
+exports.listStaff = async (req, res) => {
+  try {
+    const result = await listStaffService();
+    return res.json(result);
+  } catch (err) {
+    console.error("❌ listStaff error:", err.message);
+    return res.status(500).json({ success: false, message: err.message });
   }
 };

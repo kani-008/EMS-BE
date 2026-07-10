@@ -363,6 +363,38 @@ async function updateStaffStatusService(callerUser, facultyId, targetStatus) {
   return { success: true, message: `Staff status successfully updated to ${targetStatus}` };
 }
 
+// ── List staff (for dropdowns) ────────────────────────────────────────────────
+
+async function listStaffService() {
+  const { rows } = await eventPool.query(
+    `SELECT
+       uf.faculty_id,
+       uf.first_name,
+       uf.last_name,
+       uf.user_name,
+       uf.user_role_id,
+       ur.user_role,
+       d.department_name
+     FROM event_management.user_faculty uf
+     LEFT JOIN event_management.user_role  ur ON uf.user_role_id   = ur.user_role_id
+     LEFT JOIN event_management.department  d ON uf.department_id  = d.department_id
+     ORDER BY uf.first_name, uf.last_name`
+  );
+  return {
+    success: true,
+    data: rows.map((r) => ({
+      faculty_id:      r.faculty_id,
+      user_name:       r.user_name,
+      first_name:      r.first_name  || "",
+      last_name:       r.last_name   || "",
+      full_name:       `${r.first_name || ""} ${r.last_name || ""}`.trim() || r.user_name,
+      user_role:       r.user_role,
+      department_name: r.department_name,
+    })),
+  };
+}
+
+
 module.exports = {
   generateRandomPassword,
   validateBatchService,
@@ -371,4 +403,6 @@ module.exports = {
   bulkCreateStaffService,
   getAdvisorContextService,
   updateStaffStatusService,
+  listStaffService,
 };
+

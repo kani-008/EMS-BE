@@ -56,4 +56,11 @@ router.patch(
   staffController.updateStaffStatus
 );
 
+// List staff — used by CreateRequestModal to populate the "Requested to" dropdown
+router.get(
+  "/",
+  verifyToken,
+  staffController.listStaff
+);
+
 module.exports = router;

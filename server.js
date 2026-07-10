@@ -15,6 +15,7 @@ const staffRoute = require("./src/routes/staffRoute");
 const studentRoute = require("./src/routes/studentRoute");
 const userRoute = require("./src/routes/userRoute");
 const profileRoute = require("./src/routes/profileRoute");
+const requestRoute = require("./src/routes/requestRoute");
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "5000", 10);
@@ -25,7 +26,6 @@ const IS_PROD = process.env.NODE_ENV === "production";
 // see the real client correctly behind the platform's load balancer. Bump via
 // TRUST_PROXY in env if you sit behind more than one proxy hop.
 app.set("trust proxy", Number(process.env.TRUST_PROXY) || 1);
-
 
 // ── CORS ────────────────────────────────────────────────────────────
 // Strip trailing slashes so "https://foo.com/" and "https://foo.com" both match.
@@ -49,7 +49,9 @@ const ALLOWED_ORIGINS = process.env.CLIENT_URL
     : defaultDevOrigins;
 
 if (IS_PROD && ALLOWED_ORIGINS.length === 0) {
-  console.warn("[cors] NODE_ENV=production but CLIENT_URL is not set — all browser origins will be blocked.");
+  console.warn(
+    "[cors] NODE_ENV=production but CLIENT_URL is not set — all browser origins will be blocked.",
+  );
 }
 
 app.use(
@@ -57,7 +59,8 @@ app.use(
     origin: (origin, cb) => {
       // allow server-to-server / curl / same-origin requests (no Origin header)
       if (!origin) return cb(null, true);
-      if (ALLOWED_ORIGINS.includes(normalizeOrigin(origin))) return cb(null, true);
+      if (ALLOWED_ORIGINS.includes(normalizeOrigin(origin)))
+        return cb(null, true);
       console.warn(`[cors] blocked origin '${origin}'`);
       cb(new Error(`CORS: origin '${origin}' not allowed`));
     },
@@ -79,7 +82,8 @@ app.use(cookieParser());
 app.get("/", (_req, res) => {
   res.json({
     success: true,
-    message: "EMS backend is running 🚀 (Node.js + Express + PostgreSQL/Supabase)",
+    message:
+      "EMS backend is running 🚀 (Node.js + Express + PostgreSQL/Supabase)",
     timestamp: new Date(),
   });
 });
@@ -92,6 +96,7 @@ app.use("/api/staff", staffRoute); // staff CRUD + profile + advisor-context
 app.use("/api/students", studentRoute); // student CRUD (advisor self-service + admin-driven)
 app.use("/api/users", userRoute); // unified admin+advisor user listing
 app.use("/api/profile", profileRoute); // role-aware profile GET/PUT
+app.use("/api/requests", requestRoute); // request management (create/list/status/delete)
 
 // ── 404 ─────────────────────────────────────────────────────────────
 app.use((_req, res) => {
@@ -101,7 +106,7 @@ app.use((_req, res) => {
 // ── Global error handler ───────────────────────────────────────────
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
-  console.error("💥 Unhandled error:", err.message);
+  console.error("Unhandled error:", err.message);
   res.status(500).json({ success: false, message: "Internal server error" });
 });
 
@@ -121,7 +126,9 @@ function getLanIp() {
 connectDB()
   .then(() => {
     const server = app.listen(PORT, HOST, () => {
-      console.log(`🚀 EMS backend started (${IS_PROD ? "production" : "development"})`);
+      console.log(
+        `🚀 EMS backend started (${IS_PROD ? "production" : "development"})`,
+      );
       if (IS_PROD) {
         console.log(`Listening on port ${PORT}`);
       } else {
@@ -137,26 +144,29 @@ connectDB()
       authPool
         .query(
           `SELECT user_name FROM credentials.table_login
-             WHERE user_role_id = 'R08' AND must_change_password = true`
+             WHERE user_role_id = 'R08' AND must_change_password = true`,
         )
         .then(({ rows }) => {
           if (rows.length > 0) {
             const names = rows.map((r) => r.user_name).join(", ");
             console.warn(
-              `⚠️  [boot] ADMIN account(s) have must_change_password = TRUE: ${names}`
+              `⚠️  [boot] ADMIN account(s) have must_change_password = TRUE: ${names}`,
             );
             console.warn(
-              "   These accounts will be forced to the profile page on every login."
+              "   These accounts will be forced to the profile page on every login.",
             );
-            console.warn(
-              "   Fix: node db/run_fix_must_change_password.js"
-            );
+            console.warn("   Fix: node db/run_fix_must_change_password.js");
           } else {
-            console.log("✅ [boot] No ADMIN accounts locked by must_change_password.");
+            console.log(
+              "✅ [boot] No ADMIN accounts locked by must_change_password.",
+            );
           }
         })
         .catch((err) =>
-          console.warn("⚠️  [boot] Could not run ADMIN must_change_password check:", err.message)
+          console.warn(
+            "⚠️  [boot] Could not run ADMIN must_change_password check:",
+            err.message,
+          ),
         );
     });
 
