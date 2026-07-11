@@ -1,84 +1,12 @@
 // src/controllers/authController.js
-// Express request handlers for auth routes.
+// Express request handlers for session teardown and "current user" lookup.
+// Login/refresh-token handlers live in src/controllers/loginController.js.
 // All business logic lives in src/services/authService.js.
 
 const {
-  loginService,
-  refreshService,
   logoutService,
   getMeService,
-  AuthError
 } = require("../services/authService");
-
-exports.login = async (req, res) => {
-  const { username, password } = req.body;
-
-  console.log({
-    route:    "POST /api/auth/login",
-    username: username || null,
-    status:   "logging in",
-  });
-
-  try {
-    if (!username || !password) {
-      console.log({ route: "POST /api/auth/login", status: 400, message: "Username and password are required" });
-      return res.status(400).json({ success: false, message: "Username and password are required" });
-    }
-
-    const result = await loginService(username, password);
-
-    console.log({
-      route:   "POST /api/auth/login",
-      username: result.user?.username || null,
-      role:     result.user?.role     || null,
-      status:   200,
-      message:  "Login successful",
-    });
-
-    const expiryStr = process.env.REFRESH_TOKEN_EXPIRES_IN || "7d";
-    let maxAge = 7 * 24 * 60 * 60 * 1000;
-    const match = expiryStr.trim().match(/^(\d+)([mdh])$/i);
-    if (match) {
-      const amount = parseInt(match[1], 10);
-      const unit = match[2].toLowerCase();
-      if (unit === 'm') maxAge = amount * 60 * 1000;
-      else if (unit === 'h') maxAge = amount * 60 * 60 * 1000;
-      else if (unit === 'd') maxAge = amount * 24 * 60 * 60 * 1000;
-    }
-
-    res.cookie("refreshToken", result.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge,
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "Login successful",
-      accessToken: result.accessToken,
-      refreshToken: result.refreshToken,
-      user:    result.user,
-    });
-  } catch (err) {
-    const status  = err?.statusCode || 401;
-    const message = err?.message    || "Login failed";
-
-    console.error({
-      route:    "POST /api/auth/login",
-      username: username || null,
-      status,
-      error:    message,
-      code:     err?.code || "LOGIN_FAILED",
-    });
-
-    return res.status(status).json({
-      success: false,
-      message,
-      code: err?.code || "LOGIN_FAILED",
-    });
-  }
-};
 
 exports.logout = async (req, res) => {
   const refreshToken = req.cookies?.refreshToken || req.body.refreshToken;
@@ -106,36 +34,6 @@ exports.logout = async (req, res) => {
   } catch (err) {
     console.error({ route: "POST /api/auth/logout", status: 500, error: err.message });
     return res.status(500).json({ message: "Logout failed" });
-  }
-};
-
-exports.refreshAccessToken = async (req, res) => {
-  const refreshToken = req.cookies?.refreshToken || req.body.refreshToken;
-  console.log({ route: "POST /api/auth/refresh-token", status: "refreshing token" });
-
-  try {
-    const result = await refreshService(refreshToken);
-    return res.status(200).json({
-      success: true,
-      accessToken: result.accessToken,
-      user: result.user
-    });
-  } catch (err) {
-    const status = err?.statusCode || 401;
-    const message = err?.message || "Token refresh failed";
-
-    console.error({
-      route: "POST /api/auth/refresh-token",
-      status,
-      error: message,
-      code: err?.code || "REFRESH_FAILED",
-    });
-
-    return res.status(status).json({
-      success: false,
-      message,
-      code: err?.code || "REFRESH_FAILED"
-    });
   }
 };
 

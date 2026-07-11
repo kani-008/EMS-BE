@@ -13,6 +13,7 @@ const { connectDB, authPool } = require("./src/config/db");
 
 // ── Routes ──────────────────────────────────────────────────────────
 const authRoute = require("./src/routes/authRoute");
+const loginRoute = require("./src/routes/loginRoute");
 const departmentRoute = require("./src/routes/departmentRoute");
 const roleRoute = require("./src/routes/roleRoute");
 const staffRoute = require("./src/routes/staffRoute");
@@ -89,7 +90,8 @@ app.get("/", (_req, res) => {
 });
 
 // ── API routes ──────────────────────────────────────────────────────
-app.use("/api/auth", authRoute); // login, logout, me
+app.use("/api/auth", loginRoute); // login, refresh-token
+app.use("/api/auth", authRoute); // logout, me
 app.use("/api/departments", departmentRoute); // reference data
 app.use("/api/roles", roleRoute); // reference data
 app.use("/api/staff", staffRoute); // staff CRUD + profile + advisor-context
