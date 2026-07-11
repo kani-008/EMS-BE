@@ -35,7 +35,24 @@ exports.login = async (req, res) => {
       message:  "Login successful",
     });
 
-    // Send access and refresh token in JSON body (no cookies)
+    const expiryStr = process.env.REFRESH_TOKEN_EXPIRES_IN || "7d";
+    let maxAge = 7 * 24 * 60 * 60 * 1000;
+    const match = expiryStr.trim().match(/^(\d+)([mdh])$/i);
+    if (match) {
+      const amount = parseInt(match[1], 10);
+      const unit = match[2].toLowerCase();
+      if (unit === 'm') maxAge = amount * 60 * 1000;
+      else if (unit === 'h') maxAge = amount * 60 * 60 * 1000;
+      else if (unit === 'd') maxAge = amount * 24 * 60 * 60 * 1000;
+    }
+
+    res.cookie("refreshToken", result.refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge,
+    });
+
     return res.status(200).json({
       success: true,
       message: "Login successful",
@@ -64,7 +81,7 @@ exports.login = async (req, res) => {
 };
 
 exports.logout = async (req, res) => {
-  const { refreshToken } = req.body;
+  const refreshToken = req.cookies?.refreshToken || req.body.refreshToken;
   const username = req.user?.username || "unknown";
   
   console.log({ 
@@ -77,6 +94,12 @@ exports.logout = async (req, res) => {
   try {
     await logoutService(refreshToken, username);
 
+    res.clearCookie("refreshToken", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+    });
+
     console.log(`[logout] User ${username} successfully logged out at ${new Date().toISOString()} (all sessions: ${!refreshToken})`);
 
     return res.status(200).json({ success: true, message: "Logout successful" });
@@ -87,7 +110,7 @@ exports.logout = async (req, res) => {
 };
 
 exports.refreshAccessToken = async (req, res) => {
-  const { refreshToken } = req.body;
+  const refreshToken = req.cookies?.refreshToken || req.body.refreshToken;
   console.log({ route: "POST /api/auth/refresh-token", status: "refreshing token" });
 
   try {

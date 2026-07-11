@@ -1,9 +1,13 @@
+process.env.DOTENV_CONFIG_QUIET = "true";
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const os = require("os");
 
-require("dotenv").config({ path: require("path").resolve(__dirname, ".env") });
+require("dotenv").config({
+  path: require("path").resolve(__dirname, ".env"),
+  quiet: true,
+});
 
 const { connectDB, authPool } = require("./src/config/db");
 
@@ -48,11 +52,7 @@ const ALLOWED_ORIGINS = process.env.CLIENT_URL
     ? [] // production must set CLIENT_URL explicitly — fail closed, no silent localhost fallback
     : defaultDevOrigins;
 
-if (IS_PROD && ALLOWED_ORIGINS.length === 0) {
-  console.warn(
-    "[cors] NODE_ENV=production but CLIENT_URL is not set — all browser origins will be blocked.",
-  );
-}
+
 
 app.use(
   cors({
@@ -126,61 +126,23 @@ function getLanIp() {
 connectDB()
   .then(() => {
     const server = app.listen(PORT, HOST, () => {
-      console.log(
-        `🚀 EMS backend started (${IS_PROD ? "production" : "development"})`,
-      );
-      if (IS_PROD) {
-        console.log(`Listening on port ${PORT}`);
-      } else {
-        console.log(`Local:   http://localhost:${PORT}`);
-        console.log(`Network: http://${getLanIp()}:${PORT}   (same Wi-Fi)`);
-      }
-
-      // ── Boot-time ADMIN sanity check ─────────────────────────────────────
-      // Warn (without crashing) if any ADMIN account still has
-      // must_change_password = true.  This is the exact condition that caused
-      // the "stuck on profile page" issue — catching it at startup means we
-      // don't need a user to log in and get stuck before noticing.
-      authPool
-        .query(
-          `SELECT user_name FROM credentials.table_login
-             WHERE user_role_id = 'R08' AND must_change_password = true`,
-        )
-        .then(({ rows }) => {
-          if (rows.length > 0) {
-            const names = rows.map((r) => r.user_name).join(", ");
-            console.warn(
-              `⚠️  [boot] ADMIN account(s) have must_change_password = TRUE: ${names}`,
-            );
-            console.warn(
-              "   These accounts will be forced to the profile page on every login.",
-            );
-            console.warn("   Fix: node db/run_fix_must_change_password.js");
-          } else {
-            console.log(
-              "✅ [boot] No ADMIN accounts locked by must_change_password.",
-            );
-          }
-        })
-        .catch((err) =>
-          console.warn(
-            "⚠️  [boot] Could not run ADMIN must_change_password check:",
-            err.message,
-          ),
-        );
+      console.log("Ems backend server started successfully");
+      console.log(`Local:   http://localhost:${PORT}`);
+      console.log(`Network: http://${getLanIp()}:${PORT}   (same Wi-Fi)`);
+      console.log("db connected successfully");
     });
 
     server.on("error", (err) => {
       if (err.code === "EADDRINUSE") {
-        console.error(`❌ Port ${PORT} is already in use.`);
+        console.error(` Port ${PORT} is already in use.`);
       } else {
-        console.error("❌ Server error:", err.message);
+        console.error(" Server error:", err.message);
       }
       process.exit(1);
     });
   })
   .catch((err) => {
-    console.error("❌ Failed to start server:", err.message);
+    console.error(err.message);
     process.exit(1);
   });
 

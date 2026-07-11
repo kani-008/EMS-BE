@@ -31,7 +31,7 @@ function parseExpiresInToMs(val) {
 }
 
 function signAccessToken(payload) {
-  const jwtSecret = process.env.JWT_SECRET;
+  const jwtSecret = process.env.ACCESS_TOKEN_SECRET || process.env.JWT_SECRET;
   if (!jwtSecret) {
     throw new AuthError("Server misconfigured", 500, "JWT_SECRET_MISSING");
   }
@@ -44,7 +44,7 @@ function signRefreshToken(payload) {
   if (!refreshSecret) {
     throw new AuthError("Server misconfigured", 500, "REFRESH_TOKEN_SECRET_MISSING");
   }
-  const expiry = process.env.REFRESH_TOKEN_EXPIRES_IN || "30d";
+  const expiry = process.env.REFRESH_TOKEN_EXPIRES_IN || "7d";
   return jwt.sign(payload, refreshSecret, { expiresIn: expiry });
 }
 
@@ -97,7 +97,7 @@ async function loginService(username, password) {
   const accessToken = signAccessToken(payload);
   const refreshToken = signRefreshToken({ username: payload.username });
 
-  const refreshTokenExpiry = process.env.REFRESH_TOKEN_EXPIRES_IN || "30d";
+  const refreshTokenExpiry = process.env.REFRESH_TOKEN_EXPIRES_IN || "7d";
   const expiresAtMs = Date.now() + parseExpiresInToMs(refreshTokenExpiry);
   const expiresAt = new Date(expiresAtMs);
 

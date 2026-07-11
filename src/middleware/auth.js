@@ -46,7 +46,7 @@ const verifyToken = async (req, res, next) => {
       return res.status(401).json({ success: false, code: "NO_TOKEN", message: "No token provided" });
     }
 
-    const jwtSecret = process.env.JWT_SECRET;
+    const jwtSecret = process.env.ACCESS_TOKEN_SECRET || process.env.JWT_SECRET;
     if (!jwtSecret) {
       return res.status(500).json({ success: false, message: "Server misconfigured" });
     }
