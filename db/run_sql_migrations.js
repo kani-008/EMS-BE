@@ -34,6 +34,7 @@ const CREDENTIALS_FILES = [
   "f_get_refresh_token.sql",
   "f_delete_refresh_token.sql",
   "f_delete_all_refresh_tokens.sql",
+  "f_soft_delete_user.sql",
 ];
 
 const EVENT_MGMT_FILES = [

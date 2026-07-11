@@ -126,6 +126,18 @@ async function getUsersService(callerUser, filters = {}) {
   };
 }
 
+async function deleteUserService(callerUser, userName) {
+  const rows = await callProcedure(authPool, "sp_soft_delete_user", [
+    String(userName).toLowerCase(),
+    callerUser.username,
+  ]);
+  const outRow = rows && rows[0];
+  if (!outRow || !outRow.p_success) {
+    throw new Error(outRow?.p_message || "Failed to delete user");
+  }
+  return { success: true, message: outRow.p_message };
+}
+
 async function updateBulkStatusService(callerUser, userIds, status) {
   const targetStatus = String(status).toUpperCase();
   if (targetStatus !== "ACTIVE" && targetStatus !== "INACTIVE") {
@@ -157,4 +169,4 @@ async function updateBulkStatusService(callerUser, userIds, status) {
   return { success: true, results };
 }
 
-module.exports = { getUsersService, updateBulkStatusService };
+module.exports = { getUsersService, updateBulkStatusService, deleteUserService };

@@ -2,7 +2,7 @@
 // Express request handlers for user-listing routes.
 // All business logic lives in src/services/userService.js.
 
-const { getUsersService, updateBulkStatusService } = require("../services/userService");
+const { getUsersService, updateBulkStatusService, deleteUserService } = require("../services/userService");
 const { eventPool, callProcedure } = require("../config/db");
 
 exports.getUsers = async (req, res) => {
@@ -29,6 +29,20 @@ exports.updateBulkStatus = async (req, res) => {
     return res.json(result);
   } catch (err) {
     console.error("❌ updateBulkStatus error:", err.message);
+    return res.status(400).json({ success: false, message: err.message });
+  }
+};
+
+exports.deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ success: false, message: "User name is required" });
+    }
+    const result = await deleteUserService(req.user, id);
+    return res.json(result);
+  } catch (err) {
+    console.error("❌ deleteUser error:", err.message);
     return res.status(400).json({ success: false, message: err.message });
   }
 };

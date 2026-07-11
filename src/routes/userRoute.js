@@ -24,4 +24,11 @@ router.get(
   userController.getFilterOptions
 );
 
+router.delete(
+  "/:id",
+  verifyToken,
+  allowRoles("ADVISOR", "ADMIN"),
+  userController.deleteUser
+);
+
 module.exports = router;
