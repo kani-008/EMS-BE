@@ -1,12 +1,24 @@
 // src/services/loginService.js
-// Business logic for the login flow specifically: password verification,
-// access/refresh token generation, and refresh-token verification/rotation.
-// Logout and "get current user" logic stay in authService.js.
+// Business logic for the full session lifecycle: login, refresh-token
+// verification/rotation, logout, and "get current user".
+// No req/res handling. All functions return data or throw.
 
-const { authPool, callProcedure } = require("../config/db");
+const { authPool, eventPool, callProcedure } = require("../config/db");
 const bcrypt = require("bcrypt");
 const jwt    = require("jsonwebtoken");
-const { AuthError, isAuthDebugEnabled } = require("./authService");
+
+class AuthError extends Error {
+  constructor(message, statusCode = 400, code = "AUTH_ERROR") {
+    super(message);
+    this.name       = "AuthError";
+    this.statusCode = statusCode;
+    this.code       = code;
+  }
+}
+
+function isAuthDebugEnabled() {
+  return String(process.env.AUTH_DEBUG || "").toLowerCase() === "true";
+}
 
 function parseExpiresInToMs(val) {
   const match = String(val || "").trim().match(/^(\d+)([mdh])$/i);
@@ -182,11 +194,68 @@ async function refreshService(refreshToken) {
   };
 }
 
+async function logoutService(refreshToken, username) {
+  if (refreshToken) {
+    await callProcedure(authPool, "sp_delete_refresh_token", [refreshToken]);
+  } else if (username) {
+    await callProcedure(authPool, "sp_delete_all_refresh_tokens", [username]);
+  }
+}
+
+async function getMeService(username, role, roleId, department_id) {
+  let departmentName  = null;
+  let advisorFields   = {};
+
+  if (department_id) {
+    try {
+      const { rows: deptRows } = await eventPool.query(
+        "SELECT department_name FROM department WHERE department_id = $1",
+        [department_id]
+      );
+      if (deptRows && deptRows.length > 0) {
+        departmentName = deptRows[0].department_name;
+      }
+    } catch (err) {
+      console.warn({ context: "getMeService (fetch department)", error: err.message });
+    }
+  }
+
+  if (role === "ADVISOR") {
+    try {
+      const { rows: facultyRows } = await eventPool.query(
+        "SELECT current_year, batch FROM user_faculty WHERE user_name = $1 LIMIT 1",
+        [username]
+      );
+      if (facultyRows && facultyRows.length > 0) {
+        advisorFields = {
+          current_year: facultyRows[0].current_year,
+          batch:        facultyRows[0].batch,
+        };
+      }
+    } catch (err) {
+      console.warn({ context: "getMeService (fetch advisor fields)", error: err.message });
+    }
+  }
+
+  return {
+    username,
+    role,
+    roleId,
+    department_id:    department_id ?? null,
+    departmentName,
+    ...advisorFields,
+  };
+}
+
 module.exports = {
+  AuthError,
+  isAuthDebugEnabled,
   signAccessToken,
   signRefreshToken,
   parseExpiresInToMs,
   getRefreshTokenMaxAgeMs,
   loginService,
   refreshService,
+  logoutService,
+  getMeService,
 };

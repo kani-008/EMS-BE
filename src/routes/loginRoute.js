@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 const loginController = require("../controllers/loginController");
+const { verifyToken } = require("../middleware/auth");
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -13,5 +14,7 @@ const loginLimiter = rateLimit({
 
 router.post("/login", loginLimiter, loginController.login);
 router.post("/refresh-token", loginController.refreshAccessToken);
+router.post("/logout", verifyToken, loginController.logout);
+router.get("/me", verifyToken, loginController.getMe);
 
 module.exports = router;
