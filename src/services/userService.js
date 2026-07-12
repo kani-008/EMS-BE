@@ -6,6 +6,10 @@ const { authPool, eventPool, callProcedure } = require("../config/db");
 const { updateStudentStatusService } = require("./studentService");
 const { updateStaffStatusService } = require("./staffService");
 
+// STUDENT role — same 'R01' check already used by updateBulkStatusService below
+// and by updateStudentStatusService in studentService.js.
+const STUDENT_ROLE_ID = "R01";
+
 async function getUsersService(callerUser, filters = {}) {
   // Normalize filters to arrays or null
   let roles = null;
@@ -127,15 +131,76 @@ async function getUsersService(callerUser, filters = {}) {
 }
 
 async function deleteUserService(callerUser, userName) {
-  const rows = await callProcedure(authPool, "sp_soft_delete_user", [
-    String(userName).toLowerCase(),
-    callerUser.username,
-  ]);
-  const outRow = rows && rows[0];
-  if (!outRow || !outRow.p_success) {
-    throw new Error(outRow?.p_message || "Failed to delete user");
+  const username = String(userName).toLowerCase();
+
+  const { rows } = await authPool.query(
+    "SELECT user_role_id, department_id FROM credentials.table_login WHERE user_name = $1",
+    [username]
+  );
+  if (rows.length === 0) {
+    throw new Error("User not found");
   }
-  return { success: true, message: outRow.p_message };
+
+  const isStudent = rows[0].user_role_id === STUDENT_ROLE_ID;
+
+  if (!isStudent) {
+    // Non-student roles: unchanged — credentials.table_login is the only
+    // place their status lives.
+    const spRows = await callProcedure(authPool, "sp_soft_delete_user", [
+      username,
+      callerUser.username,
+    ]);
+    const outRow = spRows && spRows[0];
+    if (!outRow || !outRow.p_success) {
+      throw new Error(outRow?.p_message || "Failed to delete user");
+    }
+    return { success: true, message: outRow.p_message };
+  }
+
+  // Student: also has a per-department row (event_management.user_student_<dept>)
+  // whose own `status` column is what the Advisor's GET /students reads — mirrors
+  // the ADMIN branch of updateStudentStatusService (studentService.js) exactly.
+  const departmentId = rows[0].department_id;
+  const deptRows = await eventPool.query(
+    "SELECT department_name FROM event_management.department WHERE department_id = $1",
+    [departmentId]
+  );
+  if (deptRows.rows.length === 0) {
+    throw new Error("Department lookup failed for student");
+  }
+  const tableName = `user_student_${deptRows.rows[0].department_name.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+
+  const client = await authPool.connect();
+  try {
+    await client.query("BEGIN");
+    const spRows = await client.query(
+      "SELECT * FROM sp_soft_delete_user($1, $2)",
+      [username, callerUser.username]
+    );
+    const outRow = spRows.rows[0];
+    if (!outRow || !outRow.p_success) {
+      throw new Error(outRow?.p_message || "Failed to delete user");
+    }
+    // credentials.table_login.user_name is always lowercase, but
+    // event_management.user_student_<dept>.roll_no is stored in whatever
+    // case it was created with (roll_no.toLowerCase() === user_name is the
+    // invariant, not roll_no === user_name) — match case-insensitively so
+    // this works regardless of which case the caller's id arrived in.
+    const deptUpdate = await client.query(
+      `UPDATE event_management.${tableName} SET status = 'INACTIVE', last_updated_by = $1 WHERE LOWER(roll_no) = $2`,
+      [callerUser.username, username]
+    );
+    if (deptUpdate.rowCount === 0) {
+      throw new Error(`Student record not found in ${tableName} for roll_no matching "${username}"`);
+    }
+    await client.query("COMMIT");
+    return { success: true, message: outRow.p_message };
+  } catch (txErr) {
+    await client.query("ROLLBACK");
+    throw txErr;
+  } finally {
+    client.release();
+  }
 }
 
 async function updateBulkStatusService(callerUser, userIds, status) {
